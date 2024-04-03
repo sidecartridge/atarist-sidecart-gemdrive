@@ -20,7 +20,7 @@
 RANDOM_SEED             equ $1284FBCD  ; Random seed for the random number generator. Should be provided by the pico in the future
 DELAY_NOPS              equ 0          ; Number of nops to wait each test of the random number generator
 BUFFER_READ_SIZE        equ 8192       ; Number of bytes to read from the Sidecart in each read call
-BUFFER_WRITE_SIZE       equ 1024       ; Number of bytes to write to the Sidecart in each write call
+BUFFER_WRITE_SIZE       equ 2048       ; Number of bytes to write to the Sidecart in each write call
 BASEPAGE_OFFSET_DTA     equ 32         ; Offset of the DTA in the basepage
 FWRITE_RETRIES          equ 3          ; Number of retries to write the data to the Sidecart per each Sidecart call
 EMULATED_DRIVE          equ 2          ; Emulated drive number: C = 2, D = 3, E = 4, F = 5, G = 6, H = 7, I = 8, J = 9, K = 10, L = 11, M = 12
@@ -45,9 +45,9 @@ PRG_MAGIC_NUMBER        equ $601A      ; Magic number of the PRG file
 ROM4_START_ADDR         equ $FA0000 ; ROM4 start address
 ROM3_START_ADDR         equ $FB0000 ; ROM3 start address
 ROM_EXCHG_BUFFER_ADDR   equ (ROM3_START_ADDR)               ; ROM4 buffer address
-RANDOM_TOKEN_ADDR:        equ (ROM_EXCHG_BUFFER_ADDR)
-RANDOM_TOKEN_SEED_ADDR:   equ (RANDOM_TOKEN_ADDR + 4) ; RANDOM_TOKEN_ADDR + 0 bytes
-RANDOM_TOKEN_POST_WAIT:    equ $8        ; Wait this cycles after the random number generator is ready
+RANDOM_TOKEN_ADDR:      equ (ROM_EXCHG_BUFFER_ADDR)
+RANDOM_TOKEN_SEED_ADDR: equ (RANDOM_TOKEN_ADDR + 4) ; RANDOM_TOKEN_ADDR + 0 bytes
+RANDOM_TOKEN_POST_WAIT: equ $1        ; Wait this cycles after the random number generator is ready
 
 CMD_MAGIC_NUMBER        equ (ROM3_START_ADDR + $ABCD)       ; Magic number to identify a command
 APP_GEMDRVEMUL          equ $0400                           ; MSB is the app code. GEMDRIVE is $04
@@ -111,23 +111,22 @@ GEMDRVEMUL_PING_STATUS  equ (GEMDRVEMUL_TIMEOUT_SEC + $4)    ; GEMDRVEMUL_TIMEOU
 GEMDRVEMUL_RTC_STATUS   equ (GEMDRVEMUL_PING_STATUS + 4)     ; ping status + 4 bytes
 GEMDRVEMUL_NETWORK_STATUS   equ (GEMDRVEMUL_RTC_STATUS + 4)  ; rtc status + 4 bytes
 GEMDRVEMUL_NETWORK_ENABLED  equ (GEMDRVEMUL_NETWORK_STATUS + 4) ; network status + 4 bytes
-GEMDRVEMUL_OLD_GEM_VEC  equ (GEMDRVEMUL_NETWORK_ENABLED + $4)    ; GEMDRVEMUL_NETWORK_ENABLED + 4 bytes
-GEMDRVEMUL_REENTRY_TRAP equ (GEMDRVEMUL_OLD_GEM_VEC + $4)   ; GEMDRVEMUL_OLD_GEM_VEC + 4 bytes
+GEMDRVEMUL_REENTRY_TRAP equ (GEMDRVEMUL_NETWORK_ENABLED + $8)   ; GEMDRVEMUL_NETWORK_ENABLED + 4 bytes + 4 GAP
 GEMDRVEMUL_DEFAULT_PATH equ (GEMDRVEMUL_REENTRY_TRAP + $4)  ; GEMDRVEMUL_REENTRY_TRAP + 4 bytes
 GEMDRVEMUL_DTA_F_FOUND  equ (GEMDRVEMUL_DEFAULT_PATH + $80)  ; GEMDRVEMUL_DEFAULT_PATH + 128 bytes
 GEMDRVEMUL_DTA_TRANSFER equ (GEMDRVEMUL_DTA_F_FOUND + $4)   ; GEMDRVEMUL_DTA_F_FOUND + 4 bytes
-GEMDRVEMUL_DTA_EXIST    equ (GEMDRVEMUL_DTA_TRANSFER + 48) ; dta transfer + sizeof(DTA) bytes
+GEMDRVEMUL_DTA_EXIST    equ (GEMDRVEMUL_DTA_TRANSFER + 44) ; dta transfer + sizeof(DTA) bytes
 GEMDRVEMUL_DTA_RELEASE  equ (GEMDRVEMUL_DTA_EXIST + 4)     ; dta exist + 4 bytes
 GEMDRVEMUL_SET_DPATH_STATUS equ (GEMDRVEMUL_DTA_RELEASE + 4)  ; dta release + 4 bytes
-GEMDRVEMUL_FOPEN_HANDLE equ (GEMDRVEMUL_SET_DPATH_STATUS + 2)    ; GEMDRVEMUL_SET_DPATH_STATUS + 2 bytes
-GEMDRVEMUL_READ_BYTES  equ (GEMDRVEMUL_FOPEN_HANDLE + 2)        ; GEMDRVEMUL_FOPEN_HANDLE + 2 bytes
+GEMDRVEMUL_FOPEN_HANDLE equ (GEMDRVEMUL_SET_DPATH_STATUS + 4)    ; GEMDRVEMUL_SET_DPATH_STATUS + 2 bytes
+GEMDRVEMUL_READ_BYTES  equ (GEMDRVEMUL_FOPEN_HANDLE + 4)        ; GEMDRVEMUL_FOPEN_HANDLE + 4 bytes
 GEMDRVEMUL_READ_BUFFER  equ (GEMDRVEMUL_READ_BYTES + 4)         ; GEMDRVEMUL_READ_BYTES + 4 bytes
 GEMDRVEMUL_WRITE_BYTES equ (GEMDRVEMUL_READ_BUFFER + BUFFER_READ_SIZE) ; GEMDRVEMUL_READ_BUFFER + BUFFER_READ_SIZE bytes
 GEMDRVEMUL_WRITE_CHK  equ (GEMDRVEMUL_WRITE_BYTES + 4)         ; GEMDRVEMUL_WRITE_BYTES + 4 bytes
 GEMDRVEMUL_WRITE_CONFIRM_STATUS equ (GEMDRVEMUL_WRITE_CHK + 4)     ; GEMDRVEMUL_WRITE_CHK+ 4 bytes
 GEMDRVEMUL_FCLOSE_STATUS equ (GEMDRVEMUL_WRITE_CONFIRM_STATUS + 4) ; GEMDRVEMUL_WRITE_CONFIRM_STATUS + 4 bytes
-GEMDRVEMUL_DCREATE_STATUS equ (GEMDRVEMUL_FCLOSE_STATUS + 2)     ; GEMDRVEMUL_FCLOSE_STATUS + 2 bytes
-GEMDRVEMUL_DDELETE_STATUS equ (GEMDRVEMUL_DCREATE_STATUS + 2)    ; GEMDRVEMUL_DCREATE_STATUS + 2 bytes
+GEMDRVEMUL_DCREATE_STATUS equ (GEMDRVEMUL_FCLOSE_STATUS + 4)     ; GEMDRVEMUL_FCLOSE_STATUS + 2 bytes + 2 bytes padding. Must be aligned to 4 bytes/32 bits
+GEMDRVEMUL_DDELETE_STATUS equ (GEMDRVEMUL_DCREATE_STATUS + 4)    ; GEMDRVEMUL_DCREATE_STATUS + 2 bytes + 2 bytes padding. Must be aligned to 4 bytes/32 bits
 GEMDRVEMUL_EXEC_HEADER  equ (GEMDRVEMUL_DDELETE_STATUS + 4)   ; GEMDRVEMUL_DDELETE_STATUS + 2 bytes + 2 bytes padding. Must be aligned to 4 bytes/32 bits
 GEMDRVEMUL_FCREATE_HANDLE equ (GEMDRVEMUL_EXEC_HEADER + 32)         ; GEMDRVEMUL_EXEC_HEADER + 32 bytes
 GEMDRVEMUL_FDELETE_STATUS equ (GEMDRVEMUL_FCREATE_HANDLE + 4)       ; GEMDRVEMUL_FCREATE_HANDLE + 4 bytes
@@ -406,8 +405,8 @@ _retest_ping:
     tst.w d0                            ; 0 if no error
     bne.s _test_ping_timeout            ; The RP2040 is not responding, timeout now
 
-    cmp.w #$FFFF, GEMDRVEMUL_PING_STATUS
-    bne.s _ping_not_yet                ; The NTP has a valid date, exit
+    tst.w GEMDRVEMUL_PING_STATUS
+    beq.s _ping_not_yet                ; The NTP has a valid date, exit
 _exit_test_ping:
     moveq #0, d0
     rts
@@ -601,8 +600,8 @@ _notlong:
 ;    beq.s .Dsetdrv
 ;    cmp.w #$19, d3                       ; Check if it's a Dgetdrv() call
 ;    beq.s .Dgetdrv
-    cmp.w #$1a, d3                       ; Check if it's a Fsetdta() call
-    beq .Fsetdta
+;    cmp.w #$1a, d3                       ; Check if it's a Fsetdta() call
+;    beq .Fsetdta
     cmp.w #Dfree, d3                     ; Check if it's a Dfree() call
     beq .Dfree
     cmp.w #$39, d3                       ; Check if it's a Dcreate() call
@@ -731,11 +730,12 @@ _notlong:
 
     ; This is an emulated drive, it's our moment!
     send_write_sync CMD_FOPEN_CALL, 256
-
-    return_interrupt_w GEMDRVEMUL_FOPEN_HANDLE    ; Return the error code from the Sidecart
+    
+    return_interrupt_l GEMDRVEMUL_FOPEN_HANDLE    ; Return the error code from the Sidecart
 
 .Fclose:
     move.w 8(a0),d3                      ; get the file handle
+    and.l #$FFFF, d3                     ; Mask the upper word of the file handle
 
     detect_emulated_file_handler         ; If not emulated, exec_old_handler the code. Otherwise continue with the code
 
@@ -752,7 +752,7 @@ _notlong:
     ; This is an emulated drive, it's our moment!
     send_write_sync CMD_FCREATE_CALL, 256
 
-    return_interrupt_l GEMDRVEMUL_FCREATE_HANDLE    ; Return the error code from the Sidecart
+    return_interrupt_w GEMDRVEMUL_FCREATE_HANDLE    ; Return the error code from the Sidecart
 
 .Fdelete:
     move.l 8(a0),a4                      ; get the fpname address
@@ -762,7 +762,7 @@ _notlong:
     ; This is an emulated drive, it's our moment!
     send_write_sync CMD_FDELETE_CALL, 256
 
-    return_interrupt_l GEMDRVEMUL_FDELETE_STATUS    ; Return the error code from the Sidecart
+    return_interrupt_w GEMDRVEMUL_FDELETE_STATUS    ; Return the error code from the Sidecart
 
 .Frename:
     move.l 10(a0),a5                     ; get the fpname address
@@ -817,26 +817,27 @@ _notlong:
     move.l 8(a0),a4                      ; get the datetime struct address
     move.w 12(a0),d4                     ; get the handle
     move.w 14(a0),d3                     ; get the flag
+    move.l 0(a4), d5                     ; get the datetime information (DOSTIME)
+    move.l 4(a4), d6                     ; get the datetime information (DOSDATE)
+    and.l #$FFFF, d3                     ; Mask the upper word of the flag
+    and.l #$FFFF, d4                     ; Mask the upper word of the handle
+
 
     detect_emulated_drive_letter         ; If not, exec_old_handler the code. Otherwise continue with the code
 
     move.l a4, -(sp)
     ; This is an emulated drive, it's our moment!
-    send_write_sync CMD_FDATETIME_CALL, 128
+    send_sync CMD_FDATETIME_CALL, 16
     move.l (sp)+, a4
     
     lea GEMDRVEMUL_FDATETIME_TIME, a6
-    move.b 1(a6), 0(a4)
-    move.b 2(a6), 1(a4)
-    move.b 3(a6), 2(a4)
+    move.b 2(a6), 0(a4)
+    move.b 3(a6), 1(a4)
     lea GEMDRVEMUL_FDATETIME_DATE, a6
-    move.b 1(a6), 3(a4)
-    move.b 2(a6), 4(a4)
-    move.b 3(a6), 5(a4) 
+    move.b 2(a6), 2(a4)
+    move.b 3(a6), 3(a4)
 
     return_interrupt_l GEMDRVEMUL_FDATETIME_STATUS    ; Return the error code from the Sidecart
-
-
 
 .Fread:
     move.w 8(a0),d3                      ; get the file handle
@@ -905,7 +906,7 @@ _notlong:
     lea GEMDRVEMUL_READ_BUFFER, a5       ; Address of the buffer to copy the data from the Sidecart
     move.l a4, d7                        ; Test if the dest address is odd or even
     btst #0, d7                          ; Check if the address is odd
-    beq.s .fread_loop_copy_even    ; If even go to copy longword 
+    beq.s .fread_loop_copy_even          ; If even go to copy longword 
 .fread_copy_odd:
     move.l d0, d7                        ; Number of bytes to copy to the buffer
     subq.l #1, d7                        ; We need to copy one byte less because dbf counts 0
@@ -971,8 +972,6 @@ _notlong:
 
     bsr.s .Fwrite_core                    ; Read the data from the Sidecart
 
-;    ext.l d0
-
     movem.l (sp)+,d2-d7/a2-a6            ; Restore registers
     rte
 
@@ -1025,16 +1024,18 @@ _notlong:
 
 ; Calculate the CHK value of the buffer to write
 .fwrite_command_ok:
-    subq.w #1, d7                        ; Subtract 1 to the number of retries
-    move.l GEMDRVEMUL_WRITE_BYTES, d2    ; The number of bytes to check the CHK
-    subq.l #1, d2                        ; Subtract 1 to the number of bytes to check the CHK, as usual
     clr.l d0                             ; Clear the CHK value
     clr.l d1                             ; Clear the sum buffer of the CHK
+    subq.w #1, d7                        ; Subtract 1 to the number of retries
+    move.l GEMDRVEMUL_WRITE_BYTES, d2    ; The number of bytes to check the CHK
+    tst.l d2                             ; Check if the number of bytes to check the CHK is 0
+    beq.s .fwrite_check_crc_exit         ; If 0, bypass the test
+    subq.l #1, d2                        ; Subtract 1 to the number of bytes to check the CHK, as usual
 .fwrite_check_crc:
     move.b (a4)+, d1                     ; Add the value to to the CHK sum
     add.l d1, d0                         ; Add the value to the CHK sum
     dbf d2, .fwrite_check_crc            ; Loop until we check all the bytes
-
+.fwrite_check_crc_exit:
 ;    movem.l d0-d3, -(sp)                ; Save the CHK value
 ;    move.l d0, d3
 ;    send_sync CMD_DEBUG, 4              ; Send the command to the Sidecart. 4 bytes of payload
@@ -1104,24 +1105,28 @@ _notlong:
     move.w 12(a0),d4                     ; get attribs
 
     cmp.b #':', 1(a4)                    ; Check if the second character of the file specification string is the colon
-    bne .fs_first_emulated               ; If not, go to the emulated code
+    bne .fs_first_check_drive            ; If not, go and check if the drive is the emulated one or not
     move.b (a4), d0                      ; Get the first character of the file specification string
     cmp.b (GEMDRVEMUL_SHARED_VARIABLES + 3 + (SHARED_VARIABLE_DRIVE_LETTER * 4)), d0   ; Check if the first letter of the file specification string is the hard disk drive letter
     beq.s .fs_first_emulated             ; If so, execute specific fsfirst emulated code
 ; We need to clean the DTA to avoid issues with previous DTAs used in the emulated code
-    reentry_gem_lock
-    gemdos Fgetdta, 2                    ; Call Fgetdta() and get the address of the DTA
-    move.l d0, -(sp)                     ; Save the return value with the address of the DTA
-    reentry_gem_unlock
-    move.l (sp)+, d3                     ; Restore the DTA value
+;    reentry_gem_lock
+;    gemdos Fgetdta, 2                    ; Call Fgetdta() and get the address of the DTA
+;    move.l d0, -(sp)                     ; Save the return value with the address of the DTA
+;    reentry_gem_unlock
+;    move.l (sp)+, d3                     ; Restore the DTA value
 
 ;    move.l _sysbase, a6
 ;    move.l 40(a6), a6
 ;    move.l 0(a6), d3                     ; Pointer to the BASEPAGE structure of the process
 ;    add.l #BASEPAGE_OFFSET_DTA, d3       ; Address of the DTA in the BASEPAGE structure
 
-    send_sync CMD_DTA_RELEASE_CALL, 4    ; Send the command to the Sidecart. 4 bytes of payload
-    bra .exec_old_handler                ; Now it's safe to execute the old handler
+;    send_sync CMD_DTA_RELEASE_CALL, 4    ; Send the command to the Sidecart. 4 bytes of payload
+
+.fs_first_check_drive:
+    detect_emulated_drive                ; If not, exec_old_handler the code. Otherwise continue with the code
+
+;    bra .exec_old_handler                ; Now it's safe to execute the old handler
 
 .fs_first_emulated:
     reentry_gem_lock
@@ -1133,32 +1138,31 @@ _notlong:
 
     move.l (sp), d3                            ; Restore the DTA value
     move.l a4, d5                              ; Save the address of the file specification string
-    send_write_sync CMD_FSFIRST_CALL, 256      ; Send the command to the Sidecart. 256 bytes of buffer to send
+    send_write_sync CMD_FSFIRST_CALL, 192      ; Send the command to the Sidecart. 256 bytes of buffer to send
 
 .populate_fsdta_struct:
-    move.l (sp)+, a4                            ; Restore the DTA value into a4
+    move.l (sp)+, a5                            ; Restore the DTA value into a5
 
     ; Test if there is a file found
     move.w GEMDRVEMUL_DTA_F_FOUND, d0           ; Get the value of the file found
     ext.l d0                                    ; Extend the sign of the value
     ; A file found, restore the DTA from the Sidecart
-    lea GEMDRVEMUL_DTA_TRANSFER, a5             ; Address of the buffer to receive the DTA
-    move.w #47, d2                              ; Number of bytes to read
-    move.l a4, d3                               ; Address of the DTA
+    lea GEMDRVEMUL_DTA_TRANSFER, a4             ; Address of the buffer to receive the DTA
+    move.l #43, d2                              ; Number of bytes to read
 .populate_fsdta_struct_loop:
-    move.b (a5)+, (a4)+                         ; Copy the DTA
+    move.b (a4)+, (a5)+                         ; Copy the DTA
     dbf d2, .populate_fsdta_struct_loop         ; Loop until we copy all the bytes
-    tst.w d0                                    ; If the value is 0, there is a file found (E_OK)
-    bne.s .empty_fsdta_struct                   ; If not, exit with the error code
+;    tst.w d0                                    ; If the value is 0, there is a file found (E_OK)
+;    bne.s .empty_fsdta_struct                   ; If not, exit with the error code
     movem.l (sp)+,d2-d7/a2-a6                   ; Restore registers
     rte
-.empty_fsdta_struct:
+;.empty_fsdta_struct:
 ;    move.l d0, -(sp)                            ; Save the return value of the operation with the DTA
 ;    send_sync CMD_DTA_RELEASE_CALL, 4           ; Send the command to the Sidecart. 4 bytes of payload
 ;    move.l (sp)+, d0                            ; Restore the return value with the address of the DTA
 ;    move.l #$ffffffd1, d0                       ; Error code. -47 is the error code for the no more files found
-    movem.l (sp)+,d2-d7/a2-a6                   ; Restore registers
-    rte
+;    movem.l (sp)+,d2-d7/a2-a6                   ; Restore registers
+;    rte
 
 
 .Fsnext:
@@ -1175,6 +1179,7 @@ _notlong:
 
     move.l d0, d3                         ; Restore the DTA value
     send_sync CMD_FSNEXT_CALL, 4          ; Send the command to the Sidecart.
+
     bra .populate_fsdta_struct
 
 .Fsnext_bypass:
@@ -1202,8 +1207,7 @@ _notlong:
 .pexec_load_go:
     clr.w d3                              ; open mode read only 
     send_write_sync CMD_FOPEN_CALL, 256
-    move.w GEMDRVEMUL_FOPEN_HANDLE, d0    ; Error code obtained from the Sidecart
-    ext.l d0                              ; Extend the sign of the value
+    move.l GEMDRVEMUL_FOPEN_HANDLE, d0    ; Error code obtained from the Sidecart
     ; If d0 is negative, there is an error
     bmi .pexec_exit                     ; If there is an error, exit
 
@@ -1337,12 +1341,12 @@ _notlong:
     add.l 14(a5), d4                     ; Add the SYMBOL size.
     add.l #$FFFF, d4
 
-    move.w GEMDRVEMUL_FOPEN_HANDLE, d3   ; Pass the file handle to close
+    move.l GEMDRVEMUL_FOPEN_HANDLE, d3   ; Pass the file handle to close
     bsr .Fread_core                      ; Read the data from the Sidecart
 
 ; Close the file
 .pexec_close_exit:
-    move.w GEMDRVEMUL_FOPEN_HANDLE, d3   ; Pass the file handle to close
+    move.l GEMDRVEMUL_FOPEN_HANDLE, d3   ; Pass the file handle to close
     send_sync CMD_FCLOSE_CALL, 2         ; Send the command to the Sidecart.
     move.w GEMDRVEMUL_FCLOSE_STATUS, d0  ; Error code obtained from the Sidecart
     ext.l d0                             ; Extend the sign of the value
@@ -1451,7 +1455,7 @@ _notlong:
     add.l #PRG_STRUCT_SIZE,sp            ; restore the stack pointer
 
 .pexec_close_exit_fix_hdr_buf_not_restore_stack:
-    move.w GEMDRVEMUL_FOPEN_HANDLE, d3   ; Pass the file handle to close
+    move.l GEMDRVEMUL_FOPEN_HANDLE, d3   ; Pass the file handle to close
     send_sync CMD_FCLOSE_CALL, 2         ; Send the command to the Sidecart.
     move.w GEMDRVEMUL_FCLOSE_STATUS, d0  ; Error code obtained from the Sidecart
     ext.l d0                             ; Extend the sign of the value
