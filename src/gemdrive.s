@@ -15,7 +15,7 @@
     XREF    nf_hexnum_buff
     XREF    nf_debugger_id
     endif
-
+    
 ; CONSTANTS
 RANDOM_SEED             equ $1284FBCD  ; Random seed for the random number generator. Should be provided by the pico in the future
 DELAY_NOPS              equ 0          ; Number of nops to wait each test of the random number generator
@@ -893,16 +893,15 @@ _notlong:
     tst.w d0                             ; Check if there is an error
     beq.s .fread_command_ok              ; If not, we can continue
     moveq.l #GEMDOS_EINTRN, d0           ; Error code. GEMDOS_EINTRN is the error code for the internal error
-    bra.s .fread_exit                    ; Exit the loop
+    bra .fread_exit                      ; Exit the loop
 
 .fread_command_ok:
     move.l GEMDRVEMUL_READ_BYTES, d0     ; The number of bytes actually read from the Sidecart or the error code
     ext.l d0                             ; Extend the sign of the value
     ; If d0 is negative, there is an error
-    bmi.s .fread_exit                    ; Exit the loop
+    bmi .fread_exit                      ; Exit the loop
     tst.l d0                             ; Check if the number of bytes read is 0
-    beq.s .fread_exit_ok                 ; If 0, we are done
-
+    beq .fread_exit_ok                   ; If 0, we are done
     lea GEMDRVEMUL_READ_BUFFER, a5       ; Address of the buffer to copy the data from the Sidecart
     move.l a4, d7                        ; Test if the dest address is odd or even
     btst #0, d7                          ; Check if the address is odd
@@ -913,13 +912,13 @@ _notlong:
 .fread_loop_copy:
     move.b (a5)+, (a4)+                  ; Copy the byte
     dbf d7, .fread_loop_copy             ; Loop until we copy all the bytes
-    bra.s .fread_copy_exit               ; No copy anymore
+    bra .fread_copy_exit               ; No copy anymore
 
 .fread_loop_copy_even:
     move.l d0, d7                        ; Number of bytes to copy to the buffer
     lsr.l #1, d7                         ; Divide the number of bytes by 2
-;    btst #1, d0                          ; Check if can copy longwords
-;    beq.s .fread_loop_copy_lword_even    ; If so, copy longwords
+    btst #1, d7                          ; Check if can copy longwords
+    beq.s .fread_loop_copy_lword_even    ; If so, copy longwords
     subq.l #1, d7                        ; We need to copy one byte less because dbf counts 0
 .fread_loop_copy_word:
     move.w (a5)+, (a4)+                  ; Copy word
@@ -927,25 +926,55 @@ _notlong:
     btst #0, d0                          ; Check if the number of bytes to copy is odd
     beq.s .fread_copy_exit               ; If not, we are done
     move.b (a5)+, (a4)+                  ; Copy the last byte
-;    bra.s .fread_copy_exit               ; No copy anymore
-;
-;.fread_loop_copy_lword_even:
-;    move.l d0, d7                        ; Number of bytes to copy to the buffer
-;    lsr.l #2, d7                         ; Divide the number of words by 2
-;    tst.l d7                             ; Check if we have to copy the last bytes
-;    beq.s .fread_loop_copy_tail_bytes    ; if zero, only copy the last bytes
-;    subq.l #1, d7                        ; We need to copy one byte less because dbf counts 0
-;.fread_loop_copy_lword:
-;    move.l (a5)+, (a4)+                  ; Copy longword
-;    dbf d7, .fread_loop_copy_lword       ; Loop until we copy all the bytes
-;
-;    move.l d0, d7                        ; Number of bytes to copy to the buffer
-;    and.l #%11, d7                       ; Check if we have to copy the last bytes        
-;    beq.s .fread_copy_exit               ; If not, we are done
-;    subq.l #1, d7                        ; We need to copy one byte less because dbf counts 0
-;.fread_loop_copy_tail_bytes:
-;    move.b (a5)+, (a4)+                  ; Copy the last byte
-;    dbf d7, .fread_loop_copy_tail_bytes  ; No copy anymore
+    bra.s .fread_copy_exit               ; No copy anymore
+
+.fread_loop_copy_lword_even:
+    move.l d0, d7                        ; Number of bytes to copy to the buffer
+    lsr.l #2, d7                         ; Divide the number of words by 4
+    tst.l d7                             ; Check if we have to copy the last bytes
+    beq.s .fread_loop_copy_tail_bytes    ; if zero, only copy the last bytes
+    subq.l #1, d7                        ; We need to copy one byte less because dbf counts 0
+
+    cmp.l #8, d7
+    blt.s .fread_loop_copy_lword
+    
+    move.l d1, -(sp)                     ; Save the register D1
+    move.l d7, d1                        ; Use D1 as loop counter for the unrolled amount
+    lsr.l #3, d1                         ; Divide the number of words by 8
+    and.l #$7, d7                        ; remaining amount of words in d7
+    subq.l #1, d1                        ; We need to copy one byte less because dbf counts 0
+.fread_loop_copy_lword_unroll_by8:      ; 8x unrolled loop
+    move.l (a5)+, (a4)+                  ; Copy longword
+    move.l (a5)+, (a4)+                  ; Copy longword
+    move.l (a5)+, (a4)+                  ; Copy longword
+    move.l (a5)+, (a4)+                  ; Copy longword
+    move.l (a5)+, (a4)+                  ; Copy longword
+    move.l (a5)+, (a4)+                  ; Copy longword
+    move.l (a5)+, (a4)+                  ; Copy longword
+    move.l (a5)+, (a4)+                  ; Copy longword
+    dbf d1, .fread_loop_copy_lword_unroll_by8
+    move.l (sp)+,d1                      ; Restore the register D1
+    
+    cmp.l #4, d7
+    blt.s .fread_loop_copy_lword
+.fread_loop_copy_lword_unroll_by4:       ; unrolled by 4
+    move.l (a5)+, (a4)+                  ; Copy longword
+    move.l (a5)+, (a4)+                  ; Copy longword
+    move.l (a5)+, (a4)+                  ; Copy longword
+    move.l (a5)+, (a4)+                  ; Copy longword
+    subq.l #4,d7
+  
+.fread_loop_copy_lword:
+    move.l (a5)+, (a4)+                  ; Copy longword
+    dbf d7, .fread_loop_copy_lword       ; Loop until we copy all the bytes
+
+    move.l d0, d7                        ; Number of bytes to copy to the buffer
+    and.l #%11, d7                       ; Check if we have to copy the last bytes        
+    beq.s .fread_copy_exit               ; If not, we are done
+    subq.l #1, d7                        ; We need to copy one byte less because dbf counts 0
+.fread_loop_copy_tail_bytes:
+    move.b (a5)+, (a4)+                  ; Copy the last byte
+    dbf d7, .fread_loop_copy_tail_bytes  ; No copy anymore
 
 
 .fread_copy_exit:
@@ -1537,83 +1566,73 @@ _start_async_code_in_stack:
 
     ; SEND PAYLOAD SIZE
     move.l a0, d0               ; Address of the ROM3 in d0    
-    or.w d1, d0                 ; OR high and low words in d0
+    move.w d1, d0                 ; OR high and low words in d0
     move.l d0, a1               ; move to a1 ready to read from this address
     move.b (a1), d0             ; Command payload size. d0 is a scratch register
     tst.w d1
     beq _no_more_payload_stack        ; If the command does not have payload, we are done.
 
     ; SEND PAYLOAD
-    move.l a0, d0
-    or.w d2, d0
+    move.w d2, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload low d2
     cmp.w #2, d1
     beq _no_more_payload_stack
 
     swap d2
-    move.l a0, d0
-    or.w d2, d0
+    move.w d2, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload high d2
     cmp.w #4, d1
     beq _no_more_payload_stack
 
-    move.l a0, d0
-    or.w d3, d0
+    move.w d3, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload low d3
     cmp.w #6, d1
     beq _no_more_payload_stack
 
     swap d3
-    move.l a0, d0
-    or.w d3, d0
+    move.w d3, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload high d3
     cmp.w #8, d1
     beq _no_more_payload_stack
 
-    move.l a0, d0
-    or.w d4, d0
+    move.w d4, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload low d4
     cmp.w #10, d1
     beq _no_more_payload_stack
 
     swap d4
-    move.l a0, d0
-    or.w d4, d0
+    move.w d4, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload high d4
     cmp.w #12, d1
     beq.s _no_more_payload_stack
 
-    move.l a0, d0
-    or.w d5, d0
+    move.w d5, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload low d5
     cmp.w #14, d1
     beq.s _no_more_payload_stack
 
     swap d5
-    move.l a0, d0
-    or.w d5, d0
+    move.w d5, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload high d5
     cmp.w #16, d1
     beq.s _no_more_payload_stack
 
-    move.l a0, d0
-    or.w d6, d0
+    move.w d6, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload low d6
     cmp.w #18, d1
     beq.s _no_more_payload_stack
 
     swap d6
-    move.l a0, d0
-    or.w d6, d0
+    move.w d6, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload high d6
 
@@ -1694,7 +1713,11 @@ send_sync_write_command_to_sidecart:
     move.l a2, a3
     lea _start_sync_write_code_in_stack, a1    ; a1 points to the start of the code in ROM
     lsr.w #2, d7
-    subq #1, d7
+    subq #5, d7                        ; unroll + 1
+    move.l (a1)+, (a2)+                ; Unroll a little...
+    move.l (a1)+, (a2)+
+    move.l (a1)+, (a2)+
+    move.l (a1)+, (a2)+
 _copy_write_sync_code:
     move.l (a1)+, (a2)+
     dbf d7, _copy_write_sync_code
@@ -1724,54 +1747,46 @@ _start_async_write_code_in_stack:
 
     ; SEND PAYLOAD SIZE
     move.l a0, d0               ; Address of the ROM3 in d0    
-    or.w d1, d0                 ; OR high and low words in d0
+    move.w d1, d0               ; OR high and low words in d0
     move.l d0, a1               ; move to a1 ready to read from this address
-    move.b (a1), d0             ; Command payload size. d0 is a scratch register
+    move.b (a1), d1             ; Command payload size. d1 is a scratch register
 
     ; SEND PAYLOAD
-    move.l a0, d0
-    or.w d2, d0
+    move.w d2, d0
     move.l d0, a1
-    move.b (a1), d0           ; Command payload low d2
+    move.b (a1), d1           ; Command payload low d2
 
     swap d2
-    move.l a0, d0
-    or.w d2, d0
+    move.w d2, d0
     move.l d0, a1
-    move.b (a1), d0           ; Command payload high d2
+    move.b (a1), d1           ; Command payload high d2
 
-    move.l a0, d0
-    or.w d3, d0
+    move.w d3, d0
     move.l d0, a1
-    move.b (a1), d0           ; Command payload low d3
+    move.b (a1), d1           ; Command payload low d3
 
     swap d3
-    move.l a0, d0
-    or.w d3, d0
+    move.w d3, d0
     move.l d0, a1
-    move.b (a1), d0           ; Command payload high d3
+    move.b (a1), d1           ; Command payload high d3
 
-    move.l a0, d0
-    or.w d4, d0
+    move.w d4, d0
     move.l d0, a1
-    move.b (a1), d0           ; Command payload low d4
+    move.b (a1), d1           ; Command payload low d4
 
     swap d4
-    move.l a0, d0
-    or.w d4, d0
+    move.w d4, d0
     move.l d0, a1
-    move.b (a1), d0           ; Command payload high d4
+    move.b (a1), d1           ; Command payload high d4
 
-    move.l a0, d0
-    or.w d5, d0
+    move.w d5, d0
     move.l d0, a1
-    move.b (a1), d0           ; Command payload low d5
+    move.b (a1), d1           ; Command payload low d5
 
     swap d5
-    move.l a0, d0
-    or.w d5, d0
+    move.w d5, d0
     move.l d0, a1
-    move.b (a1), d0           ; Command payload high d5
+    move.b (a1), d1           ; Command payload high d5
 
     ;
     ; SEND MEMORY BUFFER TO WRITE
@@ -1784,23 +1799,47 @@ _start_async_write_code_in_stack:
     btst #0, d0
     beq.s _write_to_sidecart_even_loop
 _write_to_sidecart_odd_loop:
+    move.l a0, d0
+_write_to_sidecart_odd_loop2:
     move.b  (a4)+, d3       ; Load the high byte
     lsl.w   #8, d3          ; Shift it to the high part of the word
     move.b  (a4)+, d3       ; Load the low byte
-    move.l a0, d0
-    or.w d3, d0
+    move.w d3, d0
     move.l d0, a1
-    move.b (a1), d0           ; Write the memory to the sidecart
-    dbf d6, _write_to_sidecart_odd_loop
+    move.b (a1), d1           ; Write the memory to the sidecart
+    dbf d6, _write_to_sidecart_odd_loop2
     bra.s _write_to_sidecart_end_loop
 
  _write_to_sidecart_even_loop:
-    move.w (a4)+, d3        ; Load the word
     move.l a0, d0
-    or.w d3, d0
+    cmp.l #4, d6
+    blt _write_to_sidecart_even_loop2
+
+    move.l d6, d1                        ; Use D1 as loop counter for the unrolled amount
+    lsr.l #2, d1                         ; Divide the number of words by 4
+    and.l #$3, d6                        ; remaining amount of words in d6
+    subq.l #1, d1                        ; We need to copy one byte less because dbf counts 0
+
+ _write_to_sidecart_even_loop_unroll_by4:        ; 4x unrolled loop
+    move.w (a4)+, d0          ; Load the word
     move.l d0, a1
     move.b (a1), d0           ; Write the memory to the sidecart
-    dbf d6, _write_to_sidecart_even_loop
+    move.w (a4)+, d0          ; Load the word
+    move.l d0, a1
+    move.b (a1), d0           ; Write the memory to the sidecart
+    move.w (a4)+, d0          ; Load the word
+    move.l d0, a1
+    move.b (a1), d0           ; Write the memory to the sidecart
+    move.w (a4)+, d0          ; Load the word
+    move.l d0, a1
+    move.b (a1), d0           ; Write the memory to the sidecart
+    dbf d1,_write_to_sidecart_even_loop_unroll_by4
+    
+ _write_to_sidecart_even_loop2:
+    move.w (a4)+, d0          ; Load the word
+    move.l d0, a1
+    move.b (a1), d1           ; Write the memory to the sidecart
+    dbf d6, _write_to_sidecart_even_loop2
 
 _write_to_sidecart_end_loop:
     ; End of the command loop. Now we need to wait for the token
