@@ -1015,34 +1015,19 @@ _notlong:
     moveq.l #GEMDOS_EINTRN, d0           ; Error code. GEMDOS_EINTRN is the error code for the internal error
     bra .fwrite_exit                   ; Exit the loop
 .fwrite_loop_retry_start:                ; Start the loop to retry to send the data
-;    ifeq USE_DSKBUF
-;        move.l _dskbufp, a5                 ; Address of the buffer to save the registers
-;        movem.l d3-d7/a4, DSKBUFP_TMP_ADDR(a5) ; Save the registers
-;    else    
-;        movem.l d3-d7/a4, -(sp)                ; Save the registers
-;    endif
-;
-;    ; Send the command to the Sidecart. handle.w, padding.w, bytes_to_write.l, pending_bytes_to_write.l and bytes to send
-;    send_write_sync CMD_WRITE_BUFF_CALL, BUFFER_WRITE_SIZE
-;
-;    ifeq USE_DSKBUF
-;        move.l _dskbufp, a5               ; Address of the buffer to save the registers
-;        movem.l DSKBUFP_TMP_ADDR(a5), d3-d7/a4 ; Restore the registers
-;    else
-;        movem.l (sp)+,d3-d7/a4                 ; Restore the registers
-;    endif
-
     tst.l (GEMDRVEMUL_SHARED_VARIABLES + (SHARED_VARIABLE_BUFFER_TYPE * 4))
     bne.s .fwrite_loop_use_stack_buffer
     move.l _dskbufp, a5                    ; Address of the buffer to read the data from the Sidecart
     movem.l d3-d7/a4, DSKBUFP_TMP_ADDR(a5) ; Save the registers
     send_write_sync CMD_WRITE_BUFF_CALL, BUFFER_WRITE_SIZE       ; Send the command to the Sidecart. handle.w, padding.w, bytes_to_read.l, pending_bytes_to_read.l
+    move.l d7, d1                          ; CHECKSUM value
     move.l _dskbufp, a5                    ; Address of the buffer to read the data from the Sidecart
     movem.l DSKBUFP_TMP_ADDR(a5), d3-d7/a4 ; Restore the registers
     bra.s .fwrite_loop_continue
 .fwrite_loop_use_stack_buffer:
     movem.l d3-d7/a4, -(sp)                ; Save the registers
     send_write_sync CMD_WRITE_BUFF_CALL, BUFFER_WRITE_SIZE       ; Send the command to the Sidecart. handle.w, padding.w, bytes_to_read.l, pending_bytes_to_read.l
+    move.l d7, d1                          ; CHECKSUM value
     movem.l (sp)+,d3-d7/a4                 ; Restore the registers
 
 .fwrite_loop_continue
@@ -1053,48 +1038,21 @@ _notlong:
 
 ; Calculate the CHK value of the buffer to write
 .fwrite_command_ok:
-    clr.l d0                             ; Clear the CHK value
-    clr.l d1                             ; Clear the sum buffer of the CHK
     subq.w #1, d7                        ; Subtract 1 to the number of retries
     move.l GEMDRVEMUL_WRITE_BYTES, d2    ; The number of bytes to check the CHK
     tst.l d2                             ; Check if the number of bytes to check the CHK is 0
     beq.s .fwrite_check_crc_exit         ; If 0, bypass the test
-    subq.l #1, d2                        ; Subtract 1 to the number of bytes to check the CHK, as usual
-.fwrite_check_crc:
-    move.b (a4)+, d1                     ; Add the value to to the CHK sum
-    add.l d1, d0                         ; Add the value to the CHK sum
-    dbf d2, .fwrite_check_crc            ; Loop until we check all the bytes
-.fwrite_check_crc_exit:
-;    movem.l d0-d3, -(sp)                ; Save the CHK value
-;    move.l d0, d3
-;    send_sync CMD_DEBUG, 4              ; Send the command to the Sidecart. 4 bytes of payload
-;    movem.l (sp)+, d0-d3                ; Restore the CHK value
 
-    cmp.l GEMDRVEMUL_WRITE_CHK, d0       ; Check if the CHK value is the same
+    cmp.l GEMDRVEMUL_WRITE_CHK, d1       ; Check if the CHK value is the same
     bne.s .fwrite_loop_retry             ; If not, retry to send the data until the number of retries is 0
 
-;    ifeq USE_DSKBUF
-;        move.l _dskbufp, a5                 ; Address of the buffer to save the registers
-;        movem.l d3-d7/a4, DSKBUFP_TMP_ADDR(a5) ; Save the registers
-;    else    
-;        movem.l d3-d7/a4, -(sp)                ; Save the registers
-;    endif
-;
-;    ; Send the command to the Sidecart. Bytes to move forward the offset in d4.l. handle.w in d3.w
-;    move.l GEMDRVEMUL_WRITE_BYTES, d4    ; The number of bytes to move forward the offset
-;    send_sync CMD_WRITE_BUFF_CHECK, 8
-;
-;    ifeq USE_DSKBUF
-;        move.l _dskbufp, a5               ; Address of the buffer to save the registers
-;        movem.l DSKBUFP_TMP_ADDR(a5), d3-d7/a4 ; Restore the registers
-;    else
-;        movem.l (sp)+,d3-d7/a4                 ; Restore the registers
-;    endif
-
+.fwrite_check_crc_exit:
+    add.l d2, a4
     tst.l (GEMDRVEMUL_SHARED_VARIABLES + (SHARED_VARIABLE_BUFFER_TYPE * 4))
     bne.s .fwrite_check_use_stack_buffer
     move.l _dskbufp, a5                    ; Address of the buffer to read the data from the Sidecart
     movem.l d3-d7/a4, DSKBUFP_TMP_ADDR(a5) ; Save the registers
+
     ; Send the command to the Sidecart. Bytes to move forward the offset in d4.l. handle.w in d3.w
     move.l GEMDRVEMUL_WRITE_BYTES, d4    ; The number of bytes to move forward the offset
     send_sync CMD_WRITE_BUFF_CHECK, 8
@@ -1103,6 +1061,7 @@ _notlong:
     bra.s .fwrite_check_continue
 .fwrite_check_use_stack_buffer:
     movem.l d3-d7/a4, -(sp)                ; Save the registers
+
     ; Send the command to the Sidecart. Bytes to move forward the offset in d4.l. handle.w in d3.w
     move.l GEMDRVEMUL_WRITE_BYTES, d4    ; The number of bytes to move forward the offset
     send_sync CMD_WRITE_BUFF_CHECK, 8
@@ -1115,6 +1074,7 @@ _notlong:
     bmi.s .fwrite_exit                   ; Exit the loop
     tst.l d0                             ; Check if the number of bytes written is 0
     beq.s .fwrite_exit_ok                ; If 0, we are done
+
     add.l d0, d6                         ; Add the number of bytes written to the counter
     cmp.w #BUFFER_WRITE_SIZE, d0         ; Check if the number of bytes written is not equal than the buffer size
     bne.s .fwrite_exit_ok                ; if not equal, it's smaller than the buffer size. We are done
@@ -1686,8 +1646,9 @@ _end_sync_code_in_stack:
 ; a4: address of the buffer to write in the sidecart
 ; Output registers:
 ; d0: error code, 0 if no error
+; d7: 16 bit checksum of the data written from address from a4 to a4 + d6
 ; a4: next address in the computer memory to retrieve
-; d1-d7 are modified. a0-a3 modified.
+; d1-d6 are modified. a0-a3 modified.
 send_sync_write_command_to_sidecart:
     move.l (sp)+, a0                 ; Return address
     move.l #_end_sync_write_code_in_stack - _start_sync_write_code_in_stack, d7
@@ -1794,6 +1755,8 @@ _start_async_write_code_in_stack:
     lsr.w #1, d6              ; Copy two bytes each iteration
     subq.w #1, d6             ; one less
 
+    clr.l d7                  ; Use D7 as the CHECKSUM store registry
+
     ; Test if the address in A4 is even or odd
     move.l a4, d0
     btst #0, d0
@@ -1807,6 +1770,9 @@ _write_to_sidecart_odd_loop2:
     move.w d3, d0
     move.l d0, a1
     move.b (a1), d1           ; Write the memory to the sidecart
+
+    add.w d3, d7             ; Add the word to the checksum
+
     dbf d6, _write_to_sidecart_odd_loop2
     bra.s _write_to_sidecart_end_loop
 
@@ -1822,21 +1788,29 @@ _write_to_sidecart_odd_loop2:
 
  _write_to_sidecart_even_loop_unroll_by4:        ; 4x unrolled loop
     move.w (a4)+, d0          ; Load the word
+    add.w d0, d7             ; Add the word to the checksum
     move.l d0, a1
     move.b (a1), d0           ; Write the memory to the sidecart
+
     move.w (a4)+, d0          ; Load the word
+    add.w d0, d7             ; Add the word to the checksum
     move.l d0, a1
     move.b (a1), d0           ; Write the memory to the sidecart
+
     move.w (a4)+, d0          ; Load the word
+    add.w d0, d7             ; Add the word to the checksum
     move.l d0, a1
     move.b (a1), d0           ; Write the memory to the sidecart
+
     move.w (a4)+, d0          ; Load the word
+    add.w d0, d7             ; Add the word to the checksum    
     move.l d0, a1
     move.b (a1), d0           ; Write the memory to the sidecart
     dbf d1,_write_to_sidecart_even_loop_unroll_by4
     
  _write_to_sidecart_even_loop2:
     move.w (a4)+, d0          ; Load the word
+    add.w d0, d7             ; Add the word to the checksum
     move.l d0, a1
     move.b (a1), d1           ; Write the memory to the sidecart
     dbf d6, _write_to_sidecart_even_loop2
@@ -1844,7 +1818,7 @@ _write_to_sidecart_odd_loop2:
 _write_to_sidecart_end_loop:
     ; End of the command loop. Now we need to wait for the token
     swap d2                   ; D2 is the only register that is not used as a scratch register
-    move.l #$000FFFFF, d7     ; Most significant word is the inner loop, least significant word is the outer loop
+    move.l #$000FFFFF, d6     ; Most significant word is the inner loop, least significant word is the outer loop
     moveq #0, d0              ; Timeout
     jmp (a3)                  ; Jump to the code in the stack
 
@@ -1852,7 +1826,7 @@ _write_to_sidecart_end_loop:
 _start_sync_write_code_in_stack:
     cmp.l RANDOM_TOKEN_ADDR, d2                    ; Compare the random number with the token
     beq.s _sync_write_token_found                  ; Token found, we can finish succesfully
-    subq.l #1, d7                                  ; Decrement the inner loop
+    subq.l #1, d6                                  ; Decrement the inner loop
     bne.s _start_sync_write_code_in_stack          ; If the inner loop is not finished, continue
 
     ; Sync token not found, timeout
@@ -1860,17 +1834,11 @@ _start_sync_write_code_in_stack:
 
 _sync_write_token_found:
 
-    move.l #RANDOM_TOKEN_POST_WAIT, d7
+    move.l #RANDOM_TOKEN_POST_WAIT, d6
 _wait_me_write:
-    subq.l #1, d7                            ; Decrement the outer loop
+    subq.l #1, d6                            ; Decrement the outer loop
     bne.s _wait_me_write                     ; Wait for the timeout
 
-;    ifeq USE_DSKBUF
-;        jmp (a2)                                 ; Return to the code in the ROM
-;    else
-;        lea (_end_sync_write_code_in_stack - _start_sync_write_code_in_stack)(sp), sp
-;        jmp (a2)                                 ; Return to the code in the ROM
-;    endif
 
     tst.l (GEMDRVEMUL_SHARED_VARIABLES + (SHARED_VARIABLE_BUFFER_TYPE * 4))
     beq.s ._wait_me_write_restore_dskbuff
