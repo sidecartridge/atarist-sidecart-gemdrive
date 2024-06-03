@@ -99,12 +99,12 @@ CMD_DTA_RELEASE_CALL    equ ($8B + APP_GEMDRVEMUL)           ; Release the DTA f
 
 
 ; Shared variables indexes
-SHARED_VARIABLE_PEXEC_RESTORE           equ 0             ; Pexec address to restore the program
-SHARED_VARIABLE_SVERSION                equ 1             ; Sidecart version from Sversion
-SHARED_VARIABLE_FIRST_FILE_DESCRIPTOR   equ 2             ; First file descriptor to use in the Sidecart
-SHARED_VARIABLE_DRIVE_LETTER            equ 3             ; Drive letter of the emulated drive
-SHARED_VARIABLE_DRIVE_NUMBER            equ 4             ; Drive number of the emulated drive
-SHARED_VARIABLE_BUFFER_TYPE             equ 5             ; Buffer type to use in the Sidecart
+; The first 16 variables are reserved for the shared functions
+SHARED_VARIABLE_FIRST_FILE_DESCRIPTOR   equ SHARED_VARIABLE_SHARED_FUNCTIONS_SIZE + 0             ; First file descriptor to use in the Sidecart
+SHARED_VARIABLE_DRIVE_LETTER            equ SHARED_VARIABLE_SHARED_FUNCTIONS_SIZE + 1             ; Drive letter of the emulated drive
+SHARED_VARIABLE_DRIVE_NUMBER            equ SHARED_VARIABLE_SHARED_FUNCTIONS_SIZE + 2             ; Drive number of the emulated drive
+SHARED_VARIABLE_BUFFER_TYPE             equ SHARED_VARIABLE_SHARED_FUNCTIONS_SIZE + 3             ; Buffer type to use in the Sidecart
+SHARED_VARIABLE_PEXEC_RESTORE           equ SHARED_VARIABLE_SHARED_FUNCTIONS_SIZE + 4             ; Pexec address to restore the program
 
 GEMDRVEMUL_TIMEOUT_SEC  equ (ROM_EXCHG_BUFFER_ADDR + $8)     ; ROM_EXCHG_BUFFER_ADDR + 8 bytes
 GEMDRVEMUL_PING_STATUS  equ (GEMDRVEMUL_TIMEOUT_SEC + $4)    ; GEMDRVEMUL_TIMEOUT_SEC + 4 bytes
@@ -165,26 +165,6 @@ GEMDOS_EINTRN           equ -65 ; GEMDOS Internal error
 
 
 ; Macros
-
-; Send a synchronous command to the Sidecart passing arguments in the Dx registers
-; /1 : The command code
-; /2 : The payload size (even number always)
-send_sync           macro
-                    moveq.l #\2, d1                      ; Set the payload size of the command
-                    move.w #\1,d0                        ; Command code
-                    bsr send_sync_command_to_sidecart    ; Send the command to the Sidecart
-                    endm    
-
-; Send a synchronous write command to the Sidecart passing arguments in the D3-D5 registers
-; A4 address of the buffer to send
-; /1 : The command code
-; /2 : The buffer size to send in bytes (will be rounded to the next word)
-send_write_sync     macro
-                    move.w #\1,d0                           ; Command code
-                    moveq.l #12, d1                         ; Set the payload size of the command (d3.l, d4.l and d5.l)
-                    move.l #\2,d6                           ; Number of bytes to send
-                    bsr send_sync_write_command_to_sidecart ; Send the command to the Sidecart
-                    endm    
 
 ; Return the error code from the Sidecart and restore the registers in the interrupt handler
 ; /1 : The memory address to return the error code
@@ -266,8 +246,10 @@ wait_sec                macro
                         move.l (sp)+, d7                    ; Restore the number counter reg
                         endm
 
+; Macros should be included before any function code
     include inc/tos.s
     include inc/debug.s
+    include inc/sidecart_macros.s
 
     ifne _RELEASE
         org $FA0040
@@ -336,27 +318,6 @@ _ping_ready:
 
 _exit_timemout:
     asksil error_sidecart_comm_msg
-    rts
-
-; Obtain the version of the TOS
-get_tos_version:
-    gemdos Sversion, 2
-    and.l #$FFFF,d0
-    cmp.w #$FC, $4.w              ; Check if the TOS version is a 192Kb or 256Kb
-    bne.s .get_tos_version_is_256k
-.get_tos_version_is_192k:
-    move.w $FC0002, d1          ; Read the TOS version from the ROM
-    bra.s .exit_get_tos_version
-.get_tos_version_is_256k:
-    move.w $E00002, d1          ; Read the TOS version from the ROM
-
-.exit_get_tos_version:
-    and.l #$FFFF,d1             ; Mask the upper word
-    swap d1
-    or.l d1, d0                 ; Set the TOS version in the upper word of d0
-    move.l #SHARED_VARIABLE_SVERSION, d3     ; Variable index
-    move.l d0, d4                           ; Variable value
-    send_sync CMD_SET_SHARED_VAR, 8
     rts
 
 ; Print the obtained TOS version
@@ -1467,389 +1428,10 @@ _notlong:
 .fill_zero_exit:
     rts
 
-; Send an sync command to the Sidecart
-; Wait until the command sets a response in the memory with a random number used as a token
-; Input registers:
-; d0.w: command code
-; d1.w: payload size
-; From d3 to d7 the payload based on the size of the payload field d1.w
-; Output registers:
-; d0: error code, 0 if no error
-; d1-d7 are modified. a0-a3 modified.
-send_sync_command_to_sidecart:
-    move.l (sp)+, a0                 ; Return address
-    move.l #_end_sync_code_in_stack - _start_sync_code_in_stack, d7
+; Shared functions included at the end of the file
+; Don't forget to include the macros for the shared functions at the top of file
+    include "inc/sidecart_functions.s"
 
-;    ifeq USE_DSKBUF
-;        ; Put the code in the disk buffer
-;        move.l _dskbufp, a2                ; Address of the buffer to send the command
-;    else
-;        ; Put the code in the stack
-;        lea -(_end_sync_code_in_stack - _start_sync_code_in_stack)(sp), sp
-;        move.l sp, a2
-;    endif
-
-    tst.l (GEMDRVEMUL_SHARED_VARIABLES + (SHARED_VARIABLE_BUFFER_TYPE * 4))
-    bne.s .send_sync_command_to_sidecart_use_stack_buffer
-    move.l _dskbufp, a2                ; Address of the buffer to send the command
-    bra.s .send_sync_command_to_sidecart_continue
-.send_sync_command_to_sidecart_use_stack_buffer:
-    lea -(_end_sync_code_in_stack - _start_sync_code_in_stack)(sp), sp
-    move.l sp, a2
-.send_sync_command_to_sidecart_continue:
-    move.l a2, a3
-    lea _start_sync_code_in_stack, a1    ; a1 points to the start of the code in ROM
-    lsr.w #2, d7
-    subq #1, d7
-_copy_sync_code:
-    move.l (a1)+, (a2)+
-    dbf d7, _copy_sync_code
-
-    move.l a0, a2                       ; Return address to a2
-
-    ; The sync command synchronize with a random token
-    move.l RANDOM_TOKEN_SEED_ADDR,d2
-    addq.w #4, d1                       ; Add 4 bytes to the payload size to include the token
-
-_start_async_code_in_stack:
-    move.l #ROM3_START_ADDR, a0 ; Start address of the ROM3
-
-    ; SEND HEADER WITH MAGIC NUMBER
-    swap d0                     ; Save the command code in the high word of d0         
-    move.b CMD_MAGIC_NUMBER, d0 ; Command header. d0 is a scratch register
-
-    ; SEND COMMAND CODE
-    swap d0                     ; Recover the command code
-    move.l a0, a1               ; Address of the ROM3
-    add.w d0, a1                ; We can use add because the command code msb is 0 and there is no sign extension            
-    move.b (a1), d0             ; Command code. d0 is a scratch register
-
-    ; SEND PAYLOAD SIZE
-    move.l a0, d0               ; Address of the ROM3 in d0    
-    move.w d1, d0                 ; OR high and low words in d0
-    move.l d0, a1               ; move to a1 ready to read from this address
-    move.b (a1), d0             ; Command payload size. d0 is a scratch register
-    tst.w d1
-    beq _no_more_payload_stack        ; If the command does not have payload, we are done.
-
-    ; SEND PAYLOAD
-    move.w d2, d0
-    move.l d0, a1
-    move.b (a1), d0           ; Command payload low d2
-    cmp.w #2, d1
-    beq _no_more_payload_stack
-
-    swap d2
-    move.w d2, d0
-    move.l d0, a1
-    move.b (a1), d0           ; Command payload high d2
-    cmp.w #4, d1
-    beq _no_more_payload_stack
-
-    move.w d3, d0
-    move.l d0, a1
-    move.b (a1), d0           ; Command payload low d3
-    cmp.w #6, d1
-    beq _no_more_payload_stack
-
-    swap d3
-    move.w d3, d0
-    move.l d0, a1
-    move.b (a1), d0           ; Command payload high d3
-    cmp.w #8, d1
-    beq _no_more_payload_stack
-
-    move.w d4, d0
-    move.l d0, a1
-    move.b (a1), d0           ; Command payload low d4
-    cmp.w #10, d1
-    beq _no_more_payload_stack
-
-    swap d4
-    move.w d4, d0
-    move.l d0, a1
-    move.b (a1), d0           ; Command payload high d4
-    cmp.w #12, d1
-    beq.s _no_more_payload_stack
-
-    move.w d5, d0
-    move.l d0, a1
-    move.b (a1), d0           ; Command payload low d5
-    cmp.w #14, d1
-    beq.s _no_more_payload_stack
-
-    swap d5
-    move.w d5, d0
-    move.l d0, a1
-    move.b (a1), d0           ; Command payload high d5
-    cmp.w #16, d1
-    beq.s _no_more_payload_stack
-
-    move.w d6, d0
-    move.l d0, a1
-    move.b (a1), d0           ; Command payload low d6
-    cmp.w #18, d1
-    beq.s _no_more_payload_stack
-
-    swap d6
-    move.w d6, d0
-    move.l d0, a1
-    move.b (a1), d0           ; Command payload high d6
-
-_no_more_payload_stack:
-    swap d2                   ; D2 is the only register that is not used as a scratch register
-    move.l #$000FFFFF, d7     ; Most significant word is the inner loop, least significant word is the outer loop
-    moveq #0, d0              ; Timeout
-    jmp (a3)                  ; Jump to the code in the stack
-; This is the code that cannot run in ROM while waiting for the command to complete
-_start_sync_code_in_stack:
-    cmp.l RANDOM_TOKEN_ADDR, d2              ; Compare the random number with the token
-    beq.s _sync_token_found                  ; Token found, we can finish succesfully
-    subq.l #1, d7                            ; Decrement the inner loop
-    bne.s _start_sync_code_in_stack          ; If the inner loop is not finished, continue
-
-
-    ; Sync token not found, timeout
-    subq.l #1, d0                            ; Timeout
-_sync_token_found:
-
-    move.l #RANDOM_TOKEN_POST_WAIT, d7
-_wait_me:
-    subq.l #1, d7                            ; Decrement the outer loop
-    bne.s _wait_me                           ; Wait for the timeout
-
-;    ifeq USE_DSKBUF
-;        jmp (a2)                                 ; Return to the code in the ROM
-;    else
-;        lea (_end_sync_code_in_stack - _start_sync_code_in_stack)(sp), sp
-;        jmp (a2)                                 ; Return to the code in the ROM
-;    endif
-    tst.l (GEMDRVEMUL_SHARED_VARIABLES + (SHARED_VARIABLE_BUFFER_TYPE * 4))
-    beq.s ._wait_me_restore_dskbuff
-    lea (_end_sync_code_in_stack - _start_sync_code_in_stack)(sp), sp
-._wait_me_restore_dskbuff:
-    jmp (a2)                                 ; Return to the code in the ROM
-
-    even    ; Do not remove this line
-    nop     ; Do not remove this line
-    nop     ; Do not remove this line
-_end_sync_code_in_stack:
-
-; Send an sync write command to the Sidecart
-; Wait until the command sets a response in the memory with a random number used as a token
-; Input registers:
-; d0.w: command code
-; d3.l: long word to send to the sidecart
-; d4.l: long word to send to the sidecart
-; d5.l: long word to send to the sidecart
-; d6.w: number of bytes to write to the sidecart starting in a4 address
-; a4: address of the buffer to write in the sidecart
-; Output registers:
-; d0: error code, 0 if no error
-; d7: 16 bit checksum of the data written from address from a4 to a4 + d6
-; a4: next address in the computer memory to retrieve
-; d1-d6 are modified. a0-a3 modified.
-send_sync_write_command_to_sidecart:
-    move.l (sp)+, a0                 ; Return address
-    move.l #_end_sync_write_code_in_stack - _start_sync_write_code_in_stack, d7
-
-;    ifeq USE_DSKBUF
-;        ; Put the code in the disk buffer
-;        move.l _dskbufp, a2                ; Address of the buffer to send the command 
-;    else
-;        ; Put the code in the stack
-;        lea -(_end_sync_write_code_in_stack - _start_sync_write_code_in_stack)(sp), sp
-;        move.l sp, a2
-;    endif
-
-    tst.l (GEMDRVEMUL_SHARED_VARIABLES + (SHARED_VARIABLE_BUFFER_TYPE * 4))
-    bne.s .send_sync_write_command_to_sidecart_use_stack_buffer
-    move.l _dskbufp, a2                ; Address of the buffer to send the command
-    bra.s .send_sync_write_command_to_sidecart_continue
-.send_sync_write_command_to_sidecart_use_stack_buffer:
-    lea -(_end_sync_write_code_in_stack - _start_sync_write_code_in_stack)(sp), sp
-    move.l sp, a2
-
-.send_sync_write_command_to_sidecart_continue:
-    move.l a2, a3
-    lea _start_sync_write_code_in_stack, a1    ; a1 points to the start of the code in ROM
-    lsr.w #2, d7
-    subq #5, d7                        ; unroll + 1
-    move.l (a1)+, (a2)+                ; Unroll a little...
-    move.l (a1)+, (a2)+
-    move.l (a1)+, (a2)+
-    move.l (a1)+, (a2)+
-_copy_write_sync_code:
-    move.l (a1)+, (a2)+
-    dbf d7, _copy_write_sync_code
-
-    move.l a0, a2                       ; Return address to a2
-
-    ; The sync write command synchronize with a random token
-    move.l RANDOM_TOKEN_SEED_ADDR,d2
-    addq.w #4, d1                       ; Add 4 bytes to the payload size to include the token
-    add.w d6, d1                        ; Add the number of bytes to write to the sidecart
-    addq.w #1, d1                       ; Add one byte to the payload before rounding to the next word
-    lsr.w #1, d1                        ; Round to the next word
-    lsl.w #1, d1                        ; Multiply by 2 because we are sending two bytes each iteration
-
-_start_async_write_code_in_stack:   
-    move.l #ROM3_START_ADDR, a0 ; We have to keep in A0 the address of the ROM3 because we need to read from it
-
-    ; SEND HEADER WITH MAGIC NUMBER
-    swap d0                     ; Save the command code in the high word of d0         
-    move.b CMD_MAGIC_NUMBER, d0; Command header. d0 is a scratch register
-
-    ; SEND COMMAND CODE
-    swap d0                     ; Recover the command code
-    move.l a0, a1               ; Address of the ROM3
-    add.w d0, a1                ; We can use add because the command code msb is 0 and there is no sign extension            
-    move.b (a1), d0             ; Command code. d0 is a scratch register
-
-    ; SEND PAYLOAD SIZE
-    move.l a0, d0               ; Address of the ROM3 in d0    
-    move.w d1, d0               ; OR high and low words in d0
-    move.l d0, a1               ; move to a1 ready to read from this address
-    move.b (a1), d1             ; Command payload size. d1 is a scratch register
-
-    ; SEND PAYLOAD
-    move.w d2, d0
-    move.l d0, a1
-    move.b (a1), d1           ; Command payload low d2
-
-    swap d2
-    move.w d2, d0
-    move.l d0, a1
-    move.b (a1), d1           ; Command payload high d2
-
-    move.w d3, d0
-    move.l d0, a1
-    move.b (a1), d1           ; Command payload low d3
-
-    swap d3
-    move.w d3, d0
-    move.l d0, a1
-    move.b (a1), d1           ; Command payload high d3
-
-    move.w d4, d0
-    move.l d0, a1
-    move.b (a1), d1           ; Command payload low d4
-
-    swap d4
-    move.w d4, d0
-    move.l d0, a1
-    move.b (a1), d1           ; Command payload high d4
-
-    move.w d5, d0
-    move.l d0, a1
-    move.b (a1), d1           ; Command payload low d5
-
-    swap d5
-    move.w d5, d0
-    move.l d0, a1
-    move.b (a1), d1           ; Command payload high d5
-
-    ;
-    ; SEND MEMORY BUFFER TO WRITE
-    ;
-    lsr.w #1, d6              ; Copy two bytes each iteration
-    subq.w #1, d6             ; one less
-
-    clr.l d7                  ; Use D7 as the CHECKSUM store registry
-
-    ; Test if the address in A4 is even or odd
-    move.l a4, d0
-    btst #0, d0
-    beq.s _write_to_sidecart_even_loop
-_write_to_sidecart_odd_loop:
-    move.l a0, d0
-_write_to_sidecart_odd_loop2:
-    move.b  (a4)+, d3       ; Load the high byte
-    lsl.w   #8, d3          ; Shift it to the high part of the word
-    move.b  (a4)+, d3       ; Load the low byte
-    move.w d3, d0
-    move.l d0, a1
-    move.b (a1), d1           ; Write the memory to the sidecart
-
-    add.w d3, d7             ; Add the word to the checksum
-
-    dbf d6, _write_to_sidecart_odd_loop2
-    bra.s _write_to_sidecart_end_loop
-
- _write_to_sidecart_even_loop:
-    move.l a0, d0
-    cmp.l #4, d6
-    blt _write_to_sidecart_even_loop2
-
-    move.l d6, d1                        ; Use D1 as loop counter for the unrolled amount
-    lsr.l #2, d1                         ; Divide the number of words by 4
-    and.l #$3, d6                        ; remaining amount of words in d6
-    subq.l #1, d1                        ; We need to copy one byte less because dbf counts 0
-
- _write_to_sidecart_even_loop_unroll_by4:        ; 4x unrolled loop
-    move.w (a4)+, d0          ; Load the word
-    add.w d0, d7             ; Add the word to the checksum
-    move.l d0, a1
-    move.b (a1), d0           ; Write the memory to the sidecart
-
-    move.w (a4)+, d0          ; Load the word
-    add.w d0, d7             ; Add the word to the checksum
-    move.l d0, a1
-    move.b (a1), d0           ; Write the memory to the sidecart
-
-    move.w (a4)+, d0          ; Load the word
-    add.w d0, d7             ; Add the word to the checksum
-    move.l d0, a1
-    move.b (a1), d0           ; Write the memory to the sidecart
-
-    move.w (a4)+, d0          ; Load the word
-    add.w d0, d7             ; Add the word to the checksum    
-    move.l d0, a1
-    move.b (a1), d0           ; Write the memory to the sidecart
-    dbf d1,_write_to_sidecart_even_loop_unroll_by4
-    
- _write_to_sidecart_even_loop2:
-    move.w (a4)+, d0          ; Load the word
-    add.w d0, d7             ; Add the word to the checksum
-    move.l d0, a1
-    move.b (a1), d1           ; Write the memory to the sidecart
-    dbf d6, _write_to_sidecart_even_loop2
-
-_write_to_sidecart_end_loop:
-    ; End of the command loop. Now we need to wait for the token
-    swap d2                   ; D2 is the only register that is not used as a scratch register
-    move.l #$000FFFFF, d6     ; Most significant word is the inner loop, least significant word is the outer loop
-    moveq #0, d0              ; Timeout
-    jmp (a3)                  ; Jump to the code in the stack
-
-; This is the code that cannot run in ROM while waiting for the command to complete
-_start_sync_write_code_in_stack:
-    cmp.l RANDOM_TOKEN_ADDR, d2                    ; Compare the random number with the token
-    beq.s _sync_write_token_found                  ; Token found, we can finish succesfully
-    subq.l #1, d6                                  ; Decrement the inner loop
-    bne.s _start_sync_write_code_in_stack          ; If the inner loop is not finished, continue
-
-    ; Sync token not found, timeout
-    subq.l #1, d0                                  ; Timeout
-
-_sync_write_token_found:
-
-    move.l #RANDOM_TOKEN_POST_WAIT, d6
-_wait_me_write:
-    subq.l #1, d6                            ; Decrement the outer loop
-    bne.s _wait_me_write                     ; Wait for the timeout
-
-
-    tst.l (GEMDRVEMUL_SHARED_VARIABLES + (SHARED_VARIABLE_BUFFER_TYPE * 4))
-    beq.s ._wait_me_write_restore_dskbuff
-    lea (_end_sync_write_code_in_stack - _start_sync_write_code_in_stack)(sp), sp
-._wait_me_write_restore_dskbuff:
-    jmp (a2)                                 ; Return to the code in the ROM
-
-    even    ; Do not remove this line
-    nop     ; Do not remove this line
-    nop     ; Do not remove this line
-_end_sync_write_code_in_stack:
 
 
 
