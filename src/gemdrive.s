@@ -158,7 +158,7 @@ _longframe              equ $59e                            ; Address of the lon
 VEC_GEMDOS              equ $21                             ; Trap #1 GEMDOS vector
 DSKBUFP_TMP_ADDR        equ $100                            ; Address of the temporary registry buffer to store the DSKBUF pointer
 DSKBUFP_SWAP_ADDR       equ $200                            ; Address of the temporary swap buffer to store the DSKBUF pointer
-
+MEGASTE_SPEED_CACHE_REG equ $FFFF8E21                       ; Address of the registry to change speed and cache in the MegaSTE
 USE_DSKBUF              equ 0                               ; Use the DSKBUF pointer to store the address of the buffer to read the data from the Sidecart. 0 = Stack, 1 = disk buffer
 
 GEMDOS_EINTRN           equ -65 ; GEMDOS Internal error
@@ -166,19 +166,43 @@ GEMDOS_EINTRN           equ -65 ; GEMDOS Internal error
 
 ; Macros
 
+; Restore the registers in the interrupt handler
+restore_regs        macro
+                    movem.l (sp)+, d1-d7/a2-a6
+                    endm
+
+; Save the registers in the interrupt handler
+save_regs           macro
+                    movem.l d1-d7/a2-a6,-(sp)
+                    endm
+
+; Restore the registries, restore the CPU speed + cache if needed and return from the exception
+return_rte          macro
+                    restore_regs
+                    restore_cpu_cache
+                    rte
+                    endm
+
 ; Return the error code from the Sidecart and restore the registers in the interrupt handler
 ; /1 : The memory address to return the error code
 return_interrupt_w  macro
                     move.w \1, d0                        ; Return the error code from the Sidecart
                     ext.l d0                             ; Extend the sign of the value
-                    movem.l (sp)+,d2-d7/a2-a6            ; Restore registers
-                    rte
+                    return_rte
                     endm
 
 return_interrupt_l  macro
                     move.l \1, d0                        ; Return the error code from the Sidecart
-                    movem.l (sp)+,d2-d7/a2-a6            ; Restore registers
-                    rte
+                    return_rte
+                    endm
+
+; Restore the CPU speed and cache in the MegaSTE
+; in d7.b the previous value always
+restore_cpu_cache   macro
+                    cmp.l #COOKIE_JAR_MEGASTE, (GEMDRVEMUL_SHARED_VARIABLES + SHARED_VARIABLE_HARDWARE_TYPE)    ; Check if the computer is a MegaSTE
+                    bne.s .\@restore_cpu_cache_continue
+                    move.b d1, MEGASTE_SPEED_CACHE_REG.w
+.\@restore_cpu_cache_continue:
                     endm
 
 ; Send a synchronous command to the Sidecart setting the reentry flag for the next GEMDOS calls
@@ -274,8 +298,8 @@ rom_function:
 .get_tos_version:
     print ok_msg
 
+; Figure out the TOS version to display
     bsr get_tos_version
-
     bsr print_tos_version
     
 ; Wait for the folder in the sd card of the Sidecart to be mounted
@@ -308,8 +332,12 @@ _ping_ready:
 ; Set the virtual hard disk
     bsr create_virtual_hard_disk
 
+
 ; Save the old GEMDRVEMUL_OLD_GEM_VEC and set our own vector
     print set_vectors_msg
+
+; Get the hardware version 
+    bsr detect_hw
     bsr save_vectors
     tst.w d0
     bne _exit_timemout
@@ -494,8 +522,15 @@ create_virtual_hard_disk:
     gemdos Dsetdrv, 4                    ; Call Dsetdrv() and set the emulated drive
     rts
 
+; Get the cookie jar from d0.l as parameter
 save_vectors:
-    move.l #gemdrive_trap,-(sp)
+    cmp.l #COOKIE_JAR_MEGASTE, d0    ; Check if the computer is a MegaSTE
+    beq.s .save_vectors_megaste      ; If it is a MegaSTE, use the trap with speed and cache change
+    move.l #gemdrive_trap,-(sp)      ; Otherwise, use the standard entry point
+    bra.s .save_vectors_continue
+.save_vectors_megaste:
+    move.l #gemdrive_trap_megaste16,-(sp)
+.save_vectors_continue:
     move.w #VEC_GEMDOS,-(sp)
     move.w #5,-(sp)                     ; Setexc() modify GEMDOS vector and add our trap
     trap #13
@@ -520,12 +555,28 @@ old_handler:
 
     even
 
+gemdrive_trap_megaste16:
+; Disable the CPU 16Mhz and Cache 
+
+    move.b MEGASTE_SPEED_CACHE_REG.w, d1           ; Save the old value of cpu speed
+    and.b #%00000001,MEGASTE_SPEED_CACHE_REG.w     ; disable MSTe cache
+; 
+; Shortcut in case of reentry (Code repeated for performance reasons)
+;
+    btst #0, GEMDRVEMUL_REENTRY_TRAP    ; Check if the reentry is locked
+    beq.s exec_trapped_handler         ; If the bit is active, we are in a reentry call. We need to exec_old_handler the code
+
+    restore_cpu_cache
+    move.l old_handler,-(sp)            ; Fake a return
+    rts                                 ; to old code.
+
 gemdrive_trap:
 ; 
 ; Shortcut in case of reentry
 ;
     btst #0, GEMDRVEMUL_REENTRY_TRAP    ; Check if the reentry is locked
-    beq.s .exec_trapped_handler           ; If the bit is active, we are in a reentry call. We need to exec_old_handler the code
+    beq.s exec_trapped_handler         ; If the bit is active, we are in a reentry call. We need to exec_old_handler the code
+
     move.l old_handler,-(sp)            ; Fake a return
     rts                                 ; to old code.
 
@@ -533,7 +584,7 @@ gemdrive_trap:
 ; No reentry, we can exec the trapped handler
 ; But first, check user or supervisor mode and the CPU type
 ;
-.exec_trapped_handler:
+exec_trapped_handler:
     btst #5, (sp)                         ; Check if called from user mode
     beq.s _user_mode                      ; if so, do correct stack pointer
 _not_user_mode:
@@ -555,7 +606,8 @@ _notlong:
 ;
 ; Trap #1 handler goes here
 ;
-    movem.l d2-d7/a2-a6,-(sp)
+    save_regs
+
     move.w 6(a0),d3                      ; get GEMDOS opcode number
 ;    cmp.w #$0e, d3                       ; Check if it's a Dsetdrv() call
 ;    beq.s .Dsetdrv
@@ -605,7 +657,8 @@ _notlong:
 ;    send_sync CMD_SHOW_VECTOR_CALL, 2    ; Send the command to the Sidecart. 2 bytes of payload
 
 .exec_old_handler:
-    movem.l (sp)+,d2-d7/a2-a6
+    restore_regs
+    restore_cpu_cache
     move.l old_handler,-(sp)            ; Fake a return
     rts                                 ; to old code.
 
@@ -635,8 +688,7 @@ _notlong:
     move.l (a5)+, (a4)+                  ; Copy the number of sectors per cluster
     ; We are done, exit with the success code
 .Dfree_exit:
-    movem.l (sp)+,d2-d7/a2-a6            ; Restore registers
-    rte
+    return_rte
 
 .Dcreate:
     move.l 8(a0),a4                      ; get the fpath address
@@ -680,8 +732,7 @@ _notlong:
 
     move.w #0, d0                        ; Error code. -33 is the error code for the file not found
     ext.l d0                             ; Extend the sign of the value
-    movem.l (sp)+,d2-d7/a2-a6            ; Restore registers
-    rte
+    return_rte
 
 .Fopen:
     move.l 8(a0),a4                      ; get the fpname address
@@ -814,8 +865,7 @@ _notlong:
 ;    send_sync CMD_DEBUG, 4
 ;    movem.l (sp)+,d0-d7/a0-a6
 
-    movem.l (sp)+,d2-d7/a2-a6            ; Restore registers
-    rte
+    return_rte
 
 .Fread_core:
     move.l d4, d5                        ; Save the number of bytes to read in d5
@@ -962,8 +1012,7 @@ _notlong:
 
     bsr.s .Fwrite_core                    ; Read the data from the Sidecart
 
-    movem.l (sp)+,d2-d7/a2-a6            ; Restore registers
-    rte
+    return_rte
 
 .Fwrite_core:
     move.l d4, d5                        ; Save the number of bytes to write in d5
@@ -1104,16 +1153,14 @@ _notlong:
     dbf d2, .populate_fsdta_struct_loop         ; Loop until we copy all the bytes
 ;    tst.w d0                                    ; If the value is 0, there is a file found (E_OK)
 ;    bne.s .empty_fsdta_struct                   ; If not, exit with the error code
-    movem.l (sp)+,d2-d7/a2-a6                   ; Restore registers
-    rte
+    return_rte
+
 ;.empty_fsdta_struct:
 ;    move.l d0, -(sp)                            ; Save the return value of the operation with the DTA
 ;    send_sync CMD_DTA_RELEASE_CALL, 4           ; Send the command to the Sidecart. 4 bytes of payload
 ;    move.l (sp)+, d0                            ; Restore the return value with the address of the DTA
 ;    move.l #$ffffffd1, d0                       ; Error code. -47 is the error code for the no more files found
-;    movem.l (sp)+,d2-d7/a2-a6                   ; Restore registers
-;    rte
-
+;    return_rte
 
 .Fsnext:
     reentry_gem_lock
@@ -1390,8 +1437,7 @@ _notlong:
 .pexec_exit_load:
     move.l GEMDRVEMUL_EXEC_PD, d0        ; Return in D0 the address of the basepage of the new process
 .pexec_exit:
-    movem.l (sp)+,d2-d7/a2-a6             ; Restore registers
-    rte
+    return_rte
 
 .pexec_close_exit_fix_hdr_buf:
 ;    ifeq USE_DSKBUF
