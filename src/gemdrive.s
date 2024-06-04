@@ -1106,6 +1106,14 @@ _notlong:
     cmp.b #':', 1(a4)                    ; Check if the second character of the file specification string is the colon
     bne .fs_first_check_drive            ; If not, go and check if the drive is the emulated one or not
     move.b (a4), d0                      ; Get the first character of the file specification string
+    cmp.b #"A", d0                        ; Check if the first letter of the file specification string is A unit
+    bne.s .fs_first_check_drive_b        ; If not, go and check if the drive is b
+    bra .exec_old_handler              ; Now it's safe to execute the old handler
+.fs_first_check_drive_b:
+    cmp.b #"B", d0                        ; Check if the first letter of the file specification string is B unit
+    bne.s .fs_first_check_drive_others   ; If not, go and check if the drive is the emulated one or not
+    bra .exec_old_handler              ; Now it's safe to execute the old handler
+.fs_first_check_drive_others:
     cmp.b (GEMDRVEMUL_SHARED_VARIABLES + 3 + (SHARED_VARIABLE_DRIVE_LETTER * 4)), d0   ; Check if the first letter of the file specification string is the hard disk drive letter
     beq.s .fs_first_emulated             ; If so, execute specific fsfirst emulated code
 ; We need to clean the DTA to avoid issues with previous DTAs used in the emulated code
