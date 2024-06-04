@@ -2,6 +2,7 @@
 
 ; constants
 _p_cookies                              equ $5a0    ; pointer to the system Cookie-Jar
+COOKIE_JAR_MEGASTE                      equ $00010010 ; Mega STE computer
 SHARED_VARIABLE_SHARED_FUNCTIONS_SIZE   equ 16      ; Size of the shared variables for the shared functions
 SHARED_VARIABLE_HARDWARE_TYPE           equ 0       ; Hardware type of the Atari ST computer
 SHARED_VARIABLE_SVERSION                equ 1       ; TOS version from Sversion
@@ -15,7 +16,7 @@ SHARED_VARIABLE_SVERSION                equ 1       ; TOS version from Sversion
 ;   None
 ;
 ; Outputs:
-;   None
+;   d0.l contains the hardware type as stored in the shared variable SHARED_VARIABLE_HARDWARE_TYPE
 detect_hw:
 	move.l _p_cookies.w,d0      ; Check the cookie-jar to know what type of machine we are running on
 	beq _old_hardware           ; No cookie-jar, so it's a TOS <= 1.04
@@ -33,9 +34,11 @@ _found_cookie:
 _old_hardware:
     clr.l d4                    ; 0x0000	0x0000	Atari ST (260 ST,520 ST,1040 ST,Mega ST,...)
 _save_hw:
+    move.l d4, -(sp)            ; Save the hardware type    
     move.l #SHARED_VARIABLE_HARDWARE_TYPE, d3   ; D3 Variable index
                                                 ; D4 Variable value
     send_sync CMD_SET_SHARED_VAR, 8
+    move.l (sp)+, d0            ; Restore the hardware type in d0.l as result
     rts
 
 ; Get the TOS version
@@ -70,13 +73,13 @@ get_tos_version:
 ; Input registers:
 ; d0.w: command code
 ; d1.w: payload size
-; From d3 to d7 the payload based on the size of the payload field d1.w
+; From d3 to d6 the payload based on the size of the payload field d1.w
 ; Output registers:
 ; d0: error code, 0 if no error
 ; d1-d7 are modified. a0-a3 modified.
 send_sync_command_to_sidecart:
     move.l (sp)+, a0                 ; Return address
-    move.l #_end_sync_code_in_stack - _start_sync_code_in_stack, d7
+    move.l #_end_sync_code_in_stack - _start_sync_code_in_stack, d6
 
     tst.l (GEMDRVEMUL_SHARED_VARIABLES + (SHARED_VARIABLE_BUFFER_TYPE * 4))
     bne.s .send_sync_command_to_sidecart_use_stack_buffer
@@ -88,11 +91,11 @@ send_sync_command_to_sidecart:
 .send_sync_command_to_sidecart_continue:
     move.l a2, a3
     lea _start_sync_code_in_stack, a1    ; a1 points to the start of the code in ROM
-    lsr.w #2, d7
-    subq #1, d7
+    lsr.w #2, d6
+    subq #1, d6
 _copy_sync_code:
     move.l (a1)+, (a2)+
-    dbf d7, _copy_sync_code
+    dbf d6, _copy_sync_code
 
     move.l a0, a2                       ; Return address to a2
 
@@ -187,14 +190,14 @@ _start_async_code_in_stack:
 
 _no_more_payload_stack:
     swap d2                   ; D2 is the only register that is not used as a scratch register
-    move.l #$000FFFFF, d7     ; Most significant word is the inner loop, least significant word is the outer loop
+    move.l #$000FFFFF, d6     ; Most significant word is the inner loop, least significant word is the outer loop
     moveq #0, d0              ; Timeout
     jmp (a3)                  ; Jump to the code in the stack
 ; This is the code that cannot run in ROM while waiting for the command to complete
 _start_sync_code_in_stack:
     cmp.l RANDOM_TOKEN_ADDR, d2              ; Compare the random number with the token
     beq.s _sync_token_found                  ; Token found, we can finish succesfully
-    subq.l #1, d7                            ; Decrement the inner loop
+    subq.l #1, d6                            ; Decrement the inner loop
     bne.s _start_sync_code_in_stack          ; If the inner loop is not finished, continue
 
 
@@ -202,9 +205,9 @@ _start_sync_code_in_stack:
     subq.l #1, d0                            ; Timeout
 _sync_token_found:
 
-    move.l #RANDOM_TOKEN_POST_WAIT, d7
+    move.l #RANDOM_TOKEN_POST_WAIT, d6
 _wait_me:
-    subq.l #1, d7                            ; Decrement the outer loop
+    subq.l #1, d6                            ; Decrement the outer loop
     bne.s _wait_me                           ; Wait for the timeout
 
     tst.l (GEMDRVEMUL_SHARED_VARIABLES + (SHARED_VARIABLE_BUFFER_TYPE * 4))
