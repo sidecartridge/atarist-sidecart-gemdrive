@@ -723,13 +723,27 @@ _notlong:
 .Dgetpath:
     move.l 8(a0),a4                      ; Address to the  new GEMDOS path
     move.w 12(a0),d3                     ; get the drive number
-    subq.w #1, d3                        ; Remove 1 to the drive number. I don't want to use the default drive
+    tst.w d3                             ; Check if the drive number is 0 (current drive)
+    beq.s .Dgetpath_current_drive        ; If it's the current drive, continue with the code
+    subq.w #1, d3                        ; Remove 1 to the drive number. A is 0, B is 1, C is 2, etc.
     cmp.w (GEMDRVEMUL_SHARED_VARIABLES + 2 + (SHARED_VARIABLE_DRIVE_NUMBER * 4)), d3            ; Check if the drive is the emulated one
     bne .exec_old_handler                ; If not, exec_old_handler the code        
 
+.Dgetpath_current_drive:
+;    detect_emulated_drive                ; Check if the drive is the emulated one. If not, exec_old_handler the code.
     ; This is the emulated drive, it's our moment!
-    send_write_sync CMD_DGETPATH_CALL, 256    
+    send_sync CMD_DGETPATH_CALL, 2       ; Two bytes of payload
 
+    move.w #$7F, d0                      ; Maximum length of the path
+    lea GEMDRVEMUL_DEFAULT_PATH, a5      ; Address of the default path
+.Dgetpath_copy:
+    tst.b (a5)
+    beq.s .Dgetpath_copy_done
+    move.b (a5)+, (a4)+                  ; Copy the path
+    dbf d0, .Dgetpath_copy
+
+.Dgetpath_copy_done:
+    move.b #0, (a4)                      ; Add the null terminator
     move.w #0, d0                        ; Error code. -33 is the error code for the file not found
     ext.l d0                             ; Extend the sign of the value
     return_rte
@@ -1106,16 +1120,11 @@ _notlong:
     cmp.b #':', 1(a4)                    ; Check if the second character of the file specification string is the colon
     bne .fs_first_check_drive            ; If not, go and check if the drive is the emulated one or not
     move.b (a4), d0                      ; Get the first character of the file specification string
-    cmp.b #"A", d0                        ; Check if the first letter of the file specification string is A unit
-    bne.s .fs_first_check_drive_b        ; If not, go and check if the drive is b
-    bra .exec_old_handler              ; Now it's safe to execute the old handler
-.fs_first_check_drive_b:
-    cmp.b #"B", d0                        ; Check if the first letter of the file specification string is B unit
-    bne.s .fs_first_check_drive_others   ; If not, go and check if the drive is the emulated one or not
-    bra .exec_old_handler              ; Now it's safe to execute the old handler
 .fs_first_check_drive_others:
+
     cmp.b (GEMDRVEMUL_SHARED_VARIABLES + 3 + (SHARED_VARIABLE_DRIVE_LETTER * 4)), d0   ; Check if the first letter of the file specification string is the hard disk drive letter
     beq.s .fs_first_emulated             ; If so, execute specific fsfirst emulated code
+    bra .exec_old_handler              ; Now it's safe to execute the old handler
 ; We need to clean the DTA to avoid issues with previous DTAs used in the emulated code
 ;    reentry_gem_lock
 ;    gemdos Fgetdta, 2                    ; Call Fgetdta() and get the address of the DTA
