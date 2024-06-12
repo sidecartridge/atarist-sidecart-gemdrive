@@ -19,7 +19,7 @@
 ; CONSTANTS
 RANDOM_SEED             equ $1284FBCD  ; Random seed for the random number generator. Should be provided by the pico in the future
 DELAY_NOPS              equ 0          ; Number of nops to wait each test of the random number generator
-BUFFER_READ_SIZE        equ 8192       ; Number of bytes to read from the Sidecart in each read call
+BUFFER_READ_SIZE        equ 16384      ; Number of bytes to read from the Sidecart in each read call
 BUFFER_WRITE_SIZE       equ 2048       ; Number of bytes to write to the Sidecart in each write call
 BASEPAGE_OFFSET_DTA     equ 32         ; Offset of the DTA in the basepage
 FWRITE_RETRIES          equ 3          ; Number of retries to write the data to the Sidecart per each Sidecart call
