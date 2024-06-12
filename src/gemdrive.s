@@ -41,6 +41,8 @@ PRG_STRUCT_SIZE         equ 28         ; Size of the GEMDOS structure in the exe
                                        ; 4 bytes: g_hflags
                                        ; 2 bytes: g_absflg
 PRG_MAGIC_NUMBER        equ $601A      ; Magic number of the PRG file
+STACK_SIZE_HACK_PEXEC   equ 50         ; This is the size of the stack to hack the Pexec() function in <=1.06 TOS versions
+                                       ; The size is the same as the size of the movem.l in the save_regs/restore_regs macros plus 4
 
 ROM4_START_ADDR         equ $FA0000 ; ROM4 start address
 ROM3_START_ADDR         equ $FB0000 ; ROM3 start address
@@ -167,11 +169,13 @@ GEMDOS_EINTRN           equ -65 ; GEMDOS Internal error
 ; Macros
 
 ; Restore the registers in the interrupt handler
+; Don't forget to update STACK_SIZE_HACK_PEXEC if you change the number of registers
 restore_regs        macro
                     movem.l (sp)+, d1-d7/a2-a6
                     endm
 
 ; Save the registers in the interrupt handler
+; Don't forget to update STACK_SIZE_HACK_PEXEC if you change the number of registers
 save_regs           macro
                     movem.l d1-d7/a2-a6,-(sp)
                     endm
@@ -1415,14 +1419,16 @@ _notlong:
     move.w #PE_GO_AND_FREE, 8(a0)        ; overwrite the mode with PE_GO_AND_FREE
     move.l (GEMDRVEMUL_SHARED_VARIABLES + (SHARED_VARIABLE_SVERSION * 4)), d0
     and.l #$FFFF, d0                     ; Mask the version number
-    cmp.w #$1500, d0    ; If the version is higher than 0x1500 (TOS 1.04 or TOS 1.06), PE_GO_AND_FREE exists
-    bhi.s .pexec_go_and_free_exists
+    cmp.w #$1500, d0    ; If the version is equal or higher than 0x1500 (TOS 1.04 or TOS 1.06), PE_GO_AND_FREE exists
+    bhs.s .pexec_go_and_free_exists
 
+; Hack for TOS 1.00 and 1.02
 ; Trap the exit of the classic PE_GO call
     move.l #SHARED_VARIABLE_PEXEC_RESTORE, d3
-    move.l 46(sp),d4                     ; Store the return address in the shared variable PEXEC_RESTORE
+    ; See the definition of STACK_SIZE_HACK_PEXEC to understand its size
+    move.l STACK_SIZE_HACK_PEXEC(sp),d4  ; Store the return address in the shared variable PEXEC_RESTORE
     send_sync CMD_SET_SHARED_VAR, 8      ; Send the command to the Sidecart. 8 bytes of payload
-    move.l #.pexec_mshrink_exit, 46(sp)  ; Trap the exit of the PE_GO before exiting to release memory
+    move.l #.pexec_mshrink_exit, STACK_SIZE_HACK_PEXEC(sp)  ; Trap the exit of the PE_GO before exiting to release memory
 
     move.l GEMDRVEMUL_PEXEC_STACK_ADDR, a0  ; We need to set again the a0 register
     move.w #PE_GO, 8(a0)                    ; overwrite the mode with PE_GO
