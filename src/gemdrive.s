@@ -426,6 +426,7 @@ setup_rtc:
     tst.l GEMDRVEMUL_RTC_STATUS     ; Test if the RTC is already started
     beq.s _setup_rtc_start          ; If the RTC is not started, continue with the code
     print rtc_already_started_msg
+    print ok_msg
     bra _set_datetime
 
 ; Start the RTC because it was not initalized yet
@@ -1501,7 +1502,9 @@ _notlong:
 
         even
 gemdrive_emulator_msg:
-        dc.b	"SidecarT GEMDRIVE - "
+        dc.b	"SidecarTridge multidevice"
+        dc.b    $d,$a,$a
+        dc.b    "GEMDRIVE - "
         
 version:
         dc.b    "v"
@@ -1513,46 +1516,46 @@ version:
         dc.b    $d,$a
 
 spacing:
-        dc.b    "+" ,$d,$a,0
+        dc.b    $d,$a,0
 
 set_version_msg:
-        dc.b	"+- TOS version: ",0
+        dc.b	"[..] TOS version: ",0
 
 set_vectors_msg:
-        dc.b	"+- Set vectors...",0
+        dc.b	"[..] Set vectors...",0
 
 stack_buffer_msg:
-        dc.b	"+- Using stack as temp buffer...",0
+        dc.b	"[..] Using stack as temp buffer...",0
 
 dskbuf_buffer_msg:
-        dc.b	"+- Using _dskbuf as temp buffer...",0
+        dc.b	"[..] Using _dskbuf as temp buffer...",0
 
 query_ping_msg:
-        dc.b	"+- Mounting microSD card...",0
+        dc.b	"[..] Mounting microSD card...",0
 
 query_network_msg:
-        dc.b	"+- Network initialization...",0
+        dc.b	"[..] Network initialization...",0
 
 query_ntp_msg:
-        dc.b	"+- NTP synchronization...",0
+        dc.b	"[..] NTP synchronization...",0
 
 rtc_already_started_msg:
-        dc.b	"+- RTC already started.",$d,$a,0
+        dc.b	"[..] RTC already started.",0
 
 emulated_drive_msg:
-        dc.b	"+- Emulating drive ",0
+        dc.b	"[..] Emulating drive ",0
 
 ready_gemdrive_msg:
-        dc.b	"+- GEMDRIVE driver loaded...",0
+        dc.b	"[..] GEMDRIVE driver loaded...",0
 
 error_sidecart_comm_msg:
-        dc.b	$d,$a,"Sidecart error communication. Reset!",$d,$a,0
+        dc.b	$d,$a,"Error communication. Power cycle the computer.",$d,$a,0
 
 backwards_msg:
         dc.b    $8, $8,0
 
 ok_msg:
-        dc.b	"OK",$d,$a,0
+        dc.b	$d,"[OK]",$d,$a,0
 
 timeout_msg:
         dc.b	"Timeout!",$d,$a,0 
