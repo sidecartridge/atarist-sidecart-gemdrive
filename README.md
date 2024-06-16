@@ -1,12 +1,12 @@
-# ATARI ST Sidecart GEMDRIVE Firmware
+# ATARI ST SidecarTridge Multi-device GEMDRIVE Firmware
 
-This repository hosts the firmware code for the Sidecart Hard disk GEM drive emulator designed for Atari ST/STE/Mega systems. In tandem with the [Sidecart Raspberry Pico firmware](https://github.com/diegoparrilla/atarist-sidecart-raspberry-pico), this firmware facilitates the functioning of the Sidecart GEMDRIVE.
+This repository hosts the firmware code for the SidecarTridge Multi-device Hard disk GEM drive emulator designed for Atari ST/STE/Mega systems. In tandem with the [SidecarTridge Multi-device Raspberry Pico firmware](https://github.com/diegoparrilla/atarist-sidecart-raspberry-pico), this firmware facilitates the functioning of the GEMDRIVE.
 
 ## Introduction
 
-The Sidecart ROM Emulator simulates the function of Atari ST cartridges, including their contained ROM memory, in line with classic TOS Atari ST applications, as prepared by the code in this repository. However, the functionality of Sidecart extends beyond the realm of simple ROM emulation; it also has the capacity to perform various additional operations.
+The functionality of SidecarTridge Multi-device extends beyond the realm of simple ROM emulation; it also has the capacity to perform various additional operations.
 
-The Sidecart GEMDRIVE is a hard disk emulator that leverages the Sidecart ROM Emulator to simulate the function of the Atari ST hard disk GEM drive.
+The GEMDRIVE is a hard disk emulator that leverages the SidecarTridge Multi-device to simulate the function of the Atari ST hard disk GEM drive.
 
 The source is bifurcated into:
 
@@ -16,9 +16,9 @@ The source is bifurcated into:
 
 There is also a third file in `src` called `gemdrive_prg.s` created for testing purposes in emulators, for example.
 
-**Note**: This ROM cannot be loaded or emulated like conventional ROMs. It has to be merged directly into the Sidecart RP2040 ROM Emulator firmware. Additional details are available in the [Sidecart Raspberry Pico firmware](https://github.com/diegoparrilla/atarist-sidecart-raspberry-pico).
+**Note**: This ROM cannot be loaded or emulated like conventional ROMs. It has to be merged directly into the SidecarTridge Multi-device RP2040 firmware. Additional details are available in the [SidecarTridge Multi-device Raspberry Pico firmware](https://github.com/diegoparrilla/atarist-sidecart-raspberry-pico).
 
-Newcomers to Sidecart are encouraged to peruse the official [Sidecart ROM Emulator website](https://sidecartridge.com) for a comprehensive understanding.
+Newcomers are encouraged to peruse the official [device website](https://sidecartridge.com) for a comprehensive understanding.
 
 ## Requirements
 
@@ -52,7 +52,7 @@ cd atarist-sidecart-gemdrive
 ./build.sh
 ```
 
-4. The `dist` folder now houses the binary files: `GEMDRIVE.BIN`, which needs to be incorporated into the Sidecart RP2040 ROM Emulator firmware, and `GEMDRIVE.IMG`, a raw binary file tailored for direct emulation by SidecarT (intended for testing).
+4. The `dist` folder now houses the binary files: `GEMDRIVE.BIN`, which needs to be incorporated into the SidecarTridge Multi-device RP2040 firmware, and `GEMDRIVE.IMG`, a raw binary file tailored for direct emulation (intended for testing).
 
 ## Developing GEMDRIVE
 
@@ -86,7 +86,7 @@ export ST_WORKING_FOLDER=<ABSOLUTE_PATH_TO_THE_FOLDER_WHERE_YOU_CLONED_THE_REPO>
 stcmd make DEBUG_MODE=1 RELEASE_MODE=0
 ```
 
-If you want to build a TOS file for testing with a Sidecart and an Atari ST computer, run this:
+If you want to build a TOS file for testing with a SidecarTridge Multi-device and an Atari ST computer, run this:
 
 ```
 stcmd make DEBUG_MODE=1 RELEASE_MODE=1
@@ -108,12 +108,12 @@ hatari --fast-boot true --tos-res med dist/GEMDRIVE.TOS &
 
 For releases, head over to the [Releases page](https://github.com/diegoparrilla/atarist-sidecart-gemdrive/releases). The latest release is always recommended.
 
-Note: The build output isn't akin to standard ROM images. The release files have to be incorporated into the Sidecart RP2040 ROM Emulator firmware.
+Note: The build output isn't akin to standard ROM images. The release files have to be incorporated into the SidecarTridge Multi-device RP2040 firmware.
 
 ## Resources 
 
-- [Sidecart ROM Emulator website](https://sidecartridge.com)
-- [Sidecart Raspberry Pico firmware](https://github.com/diegoparrilla/atarist-sidecart-raspberry-pico) - Where the second phase of the Sidecart ROM Emulator firmware evolution unfolds.
+- [SidecarTridge Multi-device Emulator website](https://sidecartridge.com)
+- [SidecarTridge Multi-device Raspberry Pico firmware](https://github.com/diegoparrilla/atarist-sidecart-raspberry-pico) - Where the second phase of the Sidecart ROM Emulator firmware evolution unfolds.
 
 ## License
 
