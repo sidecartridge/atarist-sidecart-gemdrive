@@ -6,6 +6,7 @@ COOKIE_JAR_MEGASTE                      equ $00010010 ; Mega STE computer
 SHARED_VARIABLE_SHARED_FUNCTIONS_SIZE   equ 16      ; Size of the shared variables for the shared functions
 SHARED_VARIABLE_HARDWARE_TYPE           equ 0       ; Hardware type of the Atari ST computer
 SHARED_VARIABLE_SVERSION                equ 1       ; TOS version from Sversion
+SHARED_VARIABLE_BUFFER_TYPE             equ 2       ; Buffer type to use in the Sidecart
 
 ; Detect the hardware of the computer we are running on
 ; This code checks for the cookie-jar and reads the _MCH cookie to determine the hardware
