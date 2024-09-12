@@ -22,4 +22,15 @@ send_write_sync     macro
                     bsr send_sync_write_command_to_sidecart ; Send the command to the Multi-device
                     endm    
 
+; Wait for second (aprox 50 VBlanks)
+wait_sec                macro
+                        move.l d7, -(sp)                    ; Save the number counter reg
+                        move.w #50, d7                      ; Loop to wait a second (aprox 50 VBlanks)
+.\@wait_sec_loop:
+                        move.w 	#37,-(sp)                   ; Wait for the VBlank. Add a delay
+                        trap 	#14
+                        addq.l 	#2,sp
+                        dbf d7, .\@wait_sec_loop
+                        move.l (sp)+, d7                    ; Restore the number counter reg
+                        endm
 
