@@ -105,8 +105,7 @@ CMD_DTA_RELEASE_CALL    equ ($8B + APP_GEMDRVEMUL)           ; Release the DTA f
 SHARED_VARIABLE_FIRST_FILE_DESCRIPTOR   equ SHARED_VARIABLE_SHARED_FUNCTIONS_SIZE + 0             ; First file descriptor to use in the Sidecart
 SHARED_VARIABLE_DRIVE_LETTER            equ SHARED_VARIABLE_SHARED_FUNCTIONS_SIZE + 1             ; Drive letter of the emulated drive
 SHARED_VARIABLE_DRIVE_NUMBER            equ SHARED_VARIABLE_SHARED_FUNCTIONS_SIZE + 2             ; Drive number of the emulated drive
-SHARED_VARIABLE_BUFFER_TYPE             equ SHARED_VARIABLE_SHARED_FUNCTIONS_SIZE + 3             ; Buffer type to use in the Sidecart
-SHARED_VARIABLE_PEXEC_RESTORE           equ SHARED_VARIABLE_SHARED_FUNCTIONS_SIZE + 4             ; Pexec address to restore the program
+SHARED_VARIABLE_PEXEC_RESTORE           equ SHARED_VARIABLE_SHARED_FUNCTIONS_SIZE + 3             ; Pexec address to restore the program
 
 GEMDRVEMUL_TIMEOUT_SEC  equ (ROM_EXCHG_BUFFER_ADDR + $8)     ; ROM_EXCHG_BUFFER_ADDR + 8 bytes
 GEMDRVEMUL_PING_STATUS  equ (GEMDRVEMUL_TIMEOUT_SEC + $4)    ; GEMDRVEMUL_TIMEOUT_SEC + 4 bytes
@@ -260,18 +259,6 @@ detect_emulated_file_handler   macro
 ;                        move.l (sp)+, d3                     ; Restore the file handle
                         cmp.l (GEMDRVEMUL_SHARED_VARIABLES + (SHARED_VARIABLE_FIRST_FILE_DESCRIPTOR * 4)), d3 ; Check if the file handle is the first one
                         blt .exec_old_handler                ; If less than, exec_old_handler the code. Otherwise continue with the code
-                        endm
-
-; Wait for second (aprox 50 VBlanks)
-wait_sec                macro
-                        move.l d7, -(sp)                    ; Save the number counter reg
-                        move.w #50, d7                      ; Loop to wait a second (aprox 50 VBlanks)
-.\@wait_sec_loop:
-                        move.w 	#37,-(sp)                   ; Wait for the VBlank. Add a delay
-                        trap 	#14
-                        addq.l 	#2,sp
-                        dbf d7, .\@wait_sec_loop
-                        move.l (sp)+, d7                    ; Restore the number counter reg
                         endm
 
 ; Macros should be included before any function code
