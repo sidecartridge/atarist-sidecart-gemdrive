@@ -1,5 +1,5 @@
-; SidecarT NetRiser - An extension to Atari ST computers through the cartridge port
-; Copyright (C) 2023 Diego Parrilla Santamaría
+; SidecarTridge Multi-device - An extension to Atari ST computers through the cartridge port
+; Copyright (C) 2023-24 GOODDATA LABS SL
 ;
 
 ; TOS macros, definitions and constants 
