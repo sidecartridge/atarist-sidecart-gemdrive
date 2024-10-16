@@ -152,6 +152,7 @@ GEMDRVEMUL_SHARED_VARIABLES equ (GEMDRVEMUL_PEXEC_ENVSTR + 4)       ; exec PD + 
 GEMDRVEMUL_EXEC_PD          equ (GEMDRVEMUL_SHARED_VARIABLES + 256) ; shared variables + 256 bytes
 
 
+_nflops                 equ $4a6                            ; This value indicates the number of floppy drives currently connected to the system
 _drvbits                equ $4c2                            ; Each of 32 bits in this longword represents a drive connected to the system. Bit #0 is A, Bit #1 is B and so on.
 _dskbufp                equ $4c6                            ; Address of the disk buffer pointer    
 _sysbase                equ $4f2                            ; Address of the system base
@@ -321,6 +322,11 @@ _ping_ready:
     print ok_msg
 
 ; Set the virtual hard disk
+    tst.w _nflops.w                 ; if there is no floppy drive, let's simulate that there is a floppy drive
+    bne.s .create_virtual_hard_disk
+    move.l #1,_drvbits.w            ; Create the drive A bit
+    move.w #1,_nflops.w             ; Simulate that floppy A is attached
+.create_virtual_hard_disk:
     bsr create_virtual_hard_disk
 
 
