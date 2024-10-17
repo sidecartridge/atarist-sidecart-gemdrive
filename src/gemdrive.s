@@ -106,6 +106,7 @@ SHARED_VARIABLE_FIRST_FILE_DESCRIPTOR   equ SHARED_VARIABLE_SHARED_FUNCTIONS_SIZ
 SHARED_VARIABLE_DRIVE_LETTER            equ SHARED_VARIABLE_SHARED_FUNCTIONS_SIZE + 1             ; Drive letter of the emulated drive
 SHARED_VARIABLE_DRIVE_NUMBER            equ SHARED_VARIABLE_SHARED_FUNCTIONS_SIZE + 2             ; Drive number of the emulated drive
 SHARED_VARIABLE_PEXEC_RESTORE           equ SHARED_VARIABLE_SHARED_FUNCTIONS_SIZE + 3             ; Pexec address to restore the program
+SHARED_VARIABLE_FAKE_FLOPPY             equ SHARED_VARIABLE_SHARED_FUNCTIONS_SIZE + 4             ; Fake floppy drive to launch AUTO programs
 
 GEMDRVEMUL_TIMEOUT_SEC  equ (ROM_EXCHG_BUFFER_ADDR + $8)     ; ROM_EXCHG_BUFFER_ADDR + 8 bytes
 GEMDRVEMUL_PING_STATUS  equ (GEMDRVEMUL_TIMEOUT_SEC + $4)    ; GEMDRVEMUL_TIMEOUT_SEC + 4 bytes
@@ -322,10 +323,12 @@ _ping_ready:
     print ok_msg
 
 ; Set the virtual hard disk
-    tst.w _nflops.w                 ; if there is no floppy drive, let's simulate that there is a floppy drive
-    bne.s .create_virtual_hard_disk
-    move.l #1,_drvbits.w            ; Create the drive A bit
-    move.w #1,_nflops.w             ; Simulate that floppy A is attached
+    tst.l (GEMDRVEMUL_SHARED_VARIABLES + (SHARED_VARIABLE_FAKE_FLOPPY * 4)) ; Do we want to simulate a floppy drive to launch AUTO programs?
+    beq.s .create_virtual_hard_disk                                         ; If not, continue with the code
+    tst.w _nflops.w                                                         ; if there is no floppy drive, let's simulate that there is a floppy drive
+    bne.s .create_virtual_hard_disk                                         ; There are floppy drives, continue with the code
+    move.l #1,_drvbits.w                                                    ; Create the drive A bit
+    move.w #1,_nflops.w                                                     ; Simulate that floppy A is attached
 .create_virtual_hard_disk:
     bsr create_virtual_hard_disk
 
