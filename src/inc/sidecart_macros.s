@@ -34,3 +34,22 @@ wait_sec                macro
                         move.l (sp)+, d7                    ; Restore the number counter reg
                         endm
 
+; Wait for second (aprox 50 VBlanks) and cancel if a key is pressed
+wait_sec_or_key_press   macro
+                        move.l d7, -(sp)                    ; Save the number counter reg
+                        move.w #50, d7                      ; Loop to wait a second (aprox 50 VBlanks)
+.\@wait_sec_key_loop:
+                        move.w  #$ff,-(sp)
+                        move.w  #Crawio,-(sp)               ; Check if a key is pressed
+                        trap    #1
+                        addq.l  #4,sp
+                        tst.l   d0                          ; Returns 0 in the register if no key is pressed
+                        bne.s   .\@wait_sec_key_loop_exit   ; If no key is pressed, continue waiting
+                        move.w 	#37,-(sp)                   ; Wait for the VBlank. Add a delay
+                        trap 	#14
+                        addq.l 	#2,sp
+                        dbf d7, .\@wait_sec_key_loop
+                        clr.l   d0                          ; Clear the register because no key was pressed
+.\@wait_sec_key_loop_exit:
+                        move.l (sp)+, d7                    ; Restore the number counter reg
+                        endm

@@ -163,6 +163,7 @@ asksil	macro	; Ask silently: print a message and wait for a key
 Cconin		EQU	1
 Cconout		EQU	2
 Cauxout		EQU	4
+Crawio		EQU	6
 Crawcin		EQU	7
 Cnecin		EQU	8
 Cconws		EQU	9

@@ -442,6 +442,11 @@ _wait_for_network_stack:
     wait_sec
     tst.l GEMDRVEMUL_NETWORK_STATUS ; Test if the network stack is ready
     bne.s _wait_for_rtc             ; The network is ok. Wait for the RTC to be ready now
+
+    wait_sec_or_key_press
+    cmp.b #27,d0                    ; Check if ESC is pressed and continue
+    beq _test_rtc_canceled          ; The user canceled the operation
+
     dbf d7, _wait_for_network_stack ; The network is not ready yet, wait a bit more
     bra _test_rtc_timeout         ; The network stack is not ready yet, timeout now
 
@@ -504,6 +509,12 @@ _test_rtc_timeout:
     print timeout_msg
     moveq #-1, d0
     rts
+
+_test_rtc_canceled:
+    print canceled_msg
+    moveq #-1, d0
+    rts
+
 ;
 ; Clean the gem reentry lock flag on start
 ;
@@ -1536,7 +1547,7 @@ query_ping_msg:
         dc.b	"[..] Mounting microSD card...",0
 
 query_network_msg:
-        dc.b	"[..] Network initialization...",0
+        dc.b	"[..] Network conf. [ESC] to cancel...",0
 
 query_ntp_msg:
         dc.b	"[..] NTP synchronization...",0
@@ -1557,10 +1568,13 @@ backwards_msg:
         dc.b    $8, $8,0
 
 ok_msg:
-        dc.b	$d,"[OK]",$d,$a,0
+        dc.b	$d, "[OK]",$d,$a,0
 
 timeout_msg:
-        dc.b	"Timeout!",$d,$a,0 
+        dc.b	$d, 27, "K[KO] Timeout!",$d,$a,0 
+
+canceled_msg:
+        dc.b	$d, 27, "K[KO] Canceled!",$d,$a,0 
 
         even
 
