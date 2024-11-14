@@ -57,7 +57,10 @@ CMD_PING                equ ($0 + APP_GEMDRVEMUL)           ; Command code to pi
 CMD_SAVE_VECTORS        equ ($1 + APP_GEMDRVEMUL)           ; Command code to save the vectors in the Sidecart
 CMD_SHOW_VECTOR_CALL    equ ($2 + APP_GEMDRVEMUL)           ; Command code to send to the RP2040 the GEMDOS command executed
 CMD_REENTRY_LOCK        equ ($3 + APP_GEMDRVEMUL)           ; Command to enable reentry GEMDOS calls
-CMD_REENTRY_UNLOCK      equ ($5 + APP_GEMDRVEMUL)           ; Command to disable reentry GEMDOS calls
+CMD_REENTRY_UNLOCK      equ ($4 + APP_GEMDRVEMUL)           ; Command to disable reentry GEMDOS calls
+
+CMD_CANCEL              equ ($5 + APP_GEMDRVEMUL)           ; Cancel the current execution
+
 CMD_RTC_START           equ ($6 + APP_GEMDRVEMUL)           ; Start the RTC
 CMD_RTC_STOP            equ ($7 + APP_GEMDRVEMUL)           ; Stop the RTC
 CMD_NETWORK_START       equ ($8 + APP_GEMDRVEMUL)           ; Start the network stack
@@ -111,7 +114,7 @@ SHARED_VARIABLE_FAKE_FLOPPY             equ SHARED_VARIABLE_SHARED_FUNCTIONS_SIZ
 GEMDRVEMUL_TIMEOUT_SEC  equ (ROM_EXCHG_BUFFER_ADDR + $8)     ; ROM_EXCHG_BUFFER_ADDR + 8 bytes
 GEMDRVEMUL_PING_STATUS  equ (GEMDRVEMUL_TIMEOUT_SEC + $4)    ; GEMDRVEMUL_TIMEOUT_SEC + 4 bytes
 GEMDRVEMUL_RTC_STATUS   equ (GEMDRVEMUL_PING_STATUS + 4)     ; ping status + 4 bytes
-GEMDRVEMUL_NETWORK_STATUS   equ (GEMDRVEMUL_RTC_STATUS + 4)  ; rtc status + 4 bytes
+GEMDRVEMUL_NETWORK_STATUS   equ (GEMDRVEMUL_RTC_STATUS + 8)  ; rtc status + 8 bytes
 GEMDRVEMUL_NETWORK_ENABLED  equ (GEMDRVEMUL_NETWORK_STATUS + 4) ; network status + 4 bytes
 GEMDRVEMUL_REENTRY_TRAP equ (GEMDRVEMUL_NETWORK_ENABLED + $8)   ; GEMDRVEMUL_NETWORK_ENABLED + 4 bytes + 4 GAP
 GEMDRVEMUL_DEFAULT_PATH equ (GEMDRVEMUL_REENTRY_TRAP + $4)  ; GEMDRVEMUL_REENTRY_TRAP + 4 bytes
@@ -254,12 +257,7 @@ detect_emulated_drive_letter   macro
 ; Check if the file handler is of the SidecarT or not.
 detect_emulated_file_handler   macro
                         and.l #$FFFF, d3                     ; Mask the upper word of the file handle
-;                        move.l d3, -(sp)                     ; Save the file handle
-;                        send_sync CMD_DEBUG, 4               ; Send the command to the Sidecart. 4 bytes of payload
-;                        move.l (GEMDRVEMUL_SHARED_VARIABLES + (SHARED_VARIABLE_FIRST_FILE_DESCRIPTOR * 4)), d3
-;                        send_sync CMD_DEBUG, 4
-;                        move.l (sp)+, d3                     ; Restore the file handle
-                        cmp.l (GEMDRVEMUL_SHARED_VARIABLES + (SHARED_VARIABLE_FIRST_FILE_DESCRIPTOR * 4)), d3 ; Check if the file handle is the first one
+                        cmp.l (GEMDRVEMUL_SHARED_VARIABLES + (SHARED_VARIABLE_FIRST_FILE_DESCRIPTOR * 4)), d3 ; Check if the file handle in the range
                         blt .exec_old_handler                ; If less than, exec_old_handler the code. Otherwise continue with the code
                         endm
 
@@ -342,6 +340,7 @@ _ping_ready:
     tst.w d0
     bne _exit_timemout
     print ok_msg
+    bsr set_datetime
     rts
 
 _exit_timemout:
@@ -427,7 +426,7 @@ setup_rtc:
     beq.s _setup_rtc_start          ; If the RTC is not started, continue with the code
     print rtc_already_started_msg
     print ok_msg
-    bra _set_datetime
+    rts                             ; We wait for the RTC to be ready, but we set the RTC at the end init
 
 ; Start the RTC because it was not initalized yet
 _setup_rtc_start:
@@ -469,7 +468,7 @@ _rtc_ready:
     print ok_msg
 
 ; Get the date and time from the RP2040 and set the IKBD information
-_set_datetime:
+set_datetime:
     ; The date and time comes in the buffer
     pea GEMDRVEMUL_RTC_STATUS           ; Buffer should have a valid IKBD date and time format
     move.w #6, -(sp)                    ; Six bytes plus the header = 7 bytes
@@ -512,6 +511,9 @@ _test_rtc_timeout:
 
 _test_rtc_canceled:
     print canceled_msg
+
+    send_sync CMD_CANCEL, 0         ; Force cancel command
+
     moveq #-1, d0
     rts
 
@@ -897,22 +899,6 @@ _notlong:
     move.l d4, d5                        ; Save the number of bytes to read in d5
     clr.l  d6                            ; d6 is the bytes read counter
 .fread_loop:
-;    ifeq USE_DSKBUF
-;        move.l _dskbufp, a5               ; Address of the buffer to read the data from the Sidecart
-;        movem.l d3-d7, DSKBUFP_TMP_ADDR(a5) ; Save the registers
-;    else    
-;        movem.l d3-d7, -(sp)                 ; Save the registers
-;    endif
-;
-;    send_sync CMD_READ_BUFF_CALL, 12     ; Send the command to the Sidecart. handle.w, padding.w, bytes_to_read.l, pending_bytes_to_read.l
-;
-;    ifeq USE_DSKBUF
-;        move.l _dskbufp, a5               ; Address of the buffer to read the data from the Sidecart
-;        movem.l DSKBUFP_TMP_ADDR(a5), d3-d7 ; Restore the registers
-;    else
-;        movem.l (sp)+,d3-d7                 ; Restore the registers
-;    endif
-
     tst.l (GEMDRVEMUL_SHARED_VARIABLES + (SHARED_VARIABLE_BUFFER_TYPE * 4))
     bne.s .fread_loop_use_stack_buffer
     move.l _dskbufp, a5               ; Address of the buffer to read the data from the Sidecart
