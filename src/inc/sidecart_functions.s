@@ -56,9 +56,15 @@ get_tos_version:
     bne.s .get_tos_version_is_256k
 .get_tos_version_is_192k:
     move.w $FC0002, d1          ; Read the TOS version from the ROM
+    cmp.l #'ETOS', $FC002C      ; Check if it's EmuTOS
+    bne.s .exit_get_tos_version
+    or.w #$8000, d0             ; Set the EMUTOS flag as a negative number
     bra.s .exit_get_tos_version
 .get_tos_version_is_256k:
     move.w $E00002, d1          ; Read the TOS version from the ROM
+    cmp.l #'ETOS', $E0002C      ; Check if it's EmuTOS
+    bne.s .exit_get_tos_version
+    or.w #$8000, d0             ; Set the EMUTOS flag as a negative number
 
 .exit_get_tos_version:
     and.l #$FFFF,d1             ; Mask the upper word

@@ -66,6 +66,10 @@ CMD_RTC_STOP            equ ($7 + APP_GEMDRVEMUL)           ; Stop the RTC
 CMD_NETWORK_START       equ ($8 + APP_GEMDRVEMUL)           ; Start the network stack
 CMD_NETWORK_STOP        equ ($9 + APP_GEMDRVEMUL)           ; Stop the network stock
 
+CMD_SAVE_XBIOS_VECTOR   equ ($A + APP_GEMDRVEMUL)           ; Command code to save the XBIOS vector in the Sidecart
+CMD_REENTRY_XBIOS_LOCK  equ ($B + APP_GEMDRVEMUL)           ; Command to enable reentry XBIOS calls
+CMD_REENTRY_XBIOS_UNLOCK equ ($C + APP_GEMDRVEMUL)          ; Command to disable reentry XBIOS calls
+
 CMD_DGETDRV_CALL        equ ($19 + APP_GEMDRVEMUL)           ; Command code to send to the RP2040 the Dgetdrv() command executed
 CMD_FSETDTA_CALL        equ ($1A + APP_GEMDRVEMUL)           ; Command code to send to the RP2040 the Fsetdta() command executed
 CMD_FSFIRST_CALL        equ ($4E + APP_GEMDRVEMUL)           ; Command code to send to the RP2040 the Fsfirst() command executed
@@ -115,9 +119,15 @@ GEMDRVEMUL_TIMEOUT_SEC  equ (ROM_EXCHG_BUFFER_ADDR + $8)     ; ROM_EXCHG_BUFFER_
 GEMDRVEMUL_PING_STATUS  equ (GEMDRVEMUL_TIMEOUT_SEC + $4)    ; GEMDRVEMUL_TIMEOUT_SEC + 4 bytes
 GEMDRVEMUL_RTC_STATUS   equ (GEMDRVEMUL_PING_STATUS + 4)     ; ping status + 4 bytes
 GEMDRVEMUL_NETWORK_STATUS   equ (GEMDRVEMUL_RTC_STATUS + 8)  ; rtc status + 8 bytes
-GEMDRVEMUL_NETWORK_ENABLED  equ (GEMDRVEMUL_NETWORK_STATUS + 4) ; network status + 4 bytes
-GEMDRVEMUL_REENTRY_TRAP equ (GEMDRVEMUL_NETWORK_ENABLED + $8)   ; GEMDRVEMUL_NETWORK_ENABLED + 4 bytes + 4 GAP
-GEMDRVEMUL_DEFAULT_PATH equ (GEMDRVEMUL_REENTRY_TRAP + $4)  ; GEMDRVEMUL_REENTRY_TRAP + 4 bytes
+GEMDRVEMUL_RTC_ENABLED  equ (GEMDRVEMUL_NETWORK_STATUS + 4) ; network status + 4 bytes
+GEMDRVEMUL_REENTRY_TRAP equ (GEMDRVEMUL_RTC_ENABLED + $8)   ; GEMDRVEMUL_RTC_ENABLED + 4 bytes + 4 GAP
+GEMDRVEMUL_OLD_XBIOS_TRAP equ (GEMDRVEMUL_REENTRY_TRAP + $4)    ; GEMDRVEMUL_REENTRY_TRAP + 4 bytes
+GEMDRVEMUL_RTC_XBIOS_REENTRY_TRAP equ (GEMDRVEMUL_OLD_XBIOS_TRAP + $4) ; GEMDRVEMUL_OLD_XBIOS_TRAP + 4 bytes
+GEMDRVEMUL_RTC_DATETIME_BCD equ (GEMDRVEMUL_RTC_XBIOS_REENTRY_TRAP + $4) ; GEMDRVEMUL_RTC_XBIOS_REENTRY_TRAP + 4 bytes
+GEMDRVEMUL_RTC_DATETIME_MSDOS equ (GEMDRVEMUL_RTC_DATETIME_BCD + 8) ; GEMDRVEMUL_RTC_DATETIME_BCD + 8 bytes
+GEMDRVEMUL_RTC_Y2K_PATCH equ (GEMDRVEMUL_RTC_DATETIME_MSDOS + 8) ; GEMDRVEMUL_RTC_DATETIME_MSDOS + 8 bytes
+GEMDRVEMUL_DEFAULT_PATH equ (GEMDRVEMUL_RTC_Y2K_PATCH + $4)  ; GEMDRVEMUL_RTC_Y2K_PATCH + 4 bytes
+
 GEMDRVEMUL_DTA_F_FOUND  equ (GEMDRVEMUL_DEFAULT_PATH + $80)  ; GEMDRVEMUL_DEFAULT_PATH + 128 bytes
 GEMDRVEMUL_DTA_TRANSFER equ (GEMDRVEMUL_DTA_F_FOUND + $4)   ; GEMDRVEMUL_DTA_F_FOUND + 4 bytes
 GEMDRVEMUL_DTA_EXIST    equ (GEMDRVEMUL_DTA_TRANSFER + 44) ; dta transfer + sizeof(DTA) bytes
@@ -162,6 +172,7 @@ _dskbufp                equ $4c6                            ; Address of the dis
 _sysbase                equ $4f2                            ; Address of the system base
 _longframe              equ $59e                            ; Address of the long frame flag. If this value is 0 then the processor uses short stack frames, otherwise it uses long stack frames.
 VEC_GEMDOS              equ $21                             ; Trap #1 GEMDOS vector
+XBIOS_TRAP_ADDR         equ $b8                             ; TRAP #14 Handler (XBIOS)
 DSKBUFP_TMP_ADDR        equ $100                            ; Address of the temporary registry buffer to store the DSKBUF pointer
 DSKBUFP_SWAP_ADDR       equ $200                            ; Address of the temporary swap buffer to store the DSKBUF pointer
 MEGASTE_SPEED_CACHE_REG equ $FFFF8E21                       ; Address of the registry to change speed and cache in the MegaSTE
@@ -273,11 +284,11 @@ rom_function:
     print gemdrive_emulator_msg
 
 ; Setup the RTC
-    tst.l GEMDRVEMUL_NETWORK_ENABLED
-    beq.s .network_conf_bypass
-    bsr setup_rtc
+    tst.l GEMDRVEMUL_RTC_ENABLED
+    beq.s .rtc_conf_bypass
+    bsr wait_rtc
 
-.network_conf_bypass:
+.rtc_conf_bypass:
     tst.l (GEMDRVEMUL_SHARED_VARIABLES + (SHARED_VARIABLE_BUFFER_TYPE * 4))
     bne.s .show_stack_buffer_msg
 
@@ -340,7 +351,13 @@ _ping_ready:
     tst.w d0
     bne _exit_timemout
     print ok_msg
-    bsr set_datetime
+
+; This is where the clock is set.
+    tst.l GEMDRVEMUL_RTC_ENABLED
+    beq.s .exit_graciouslly
+    bsr setup_datetime
+
+.exit_graciouslly:
     rts
 
 _exit_timemout:
@@ -420,16 +437,16 @@ _test_ping_timeout:
     moveq #-1, d0
     rts
 
-; Configure the SidecarT to get the NTP time
-setup_rtc:
+; wait for the RTC to be ready
+wait_rtc:
     tst.l GEMDRVEMUL_RTC_STATUS     ; Test if the RTC is already started
-    beq.s _setup_rtc_start          ; If the RTC is not started, continue with the code
+    beq.s _wait_rtc_start           ; If the RTC is not started, continue with the code
     print rtc_already_started_msg
     print ok_msg
     rts                             ; We wait for the RTC to be ready, but we set the RTC at the end init
 
 ; Start the RTC because it was not initalized yet
-_setup_rtc_start:
+_wait_rtc_start:
     print query_network_msg
      
 ; Loop to wait for the Network to be ready
@@ -463,47 +480,60 @@ _wait_for_rtc_loop:
     tst.l GEMDRVEMUL_RTC_STATUS     ; Test if the RTC is ready
     bne.s _rtc_ready                ; The RTC is ready to start now
     dbf d7, _wait_for_rtc_loop      ; The RTC is not ready yet, wait a bit more
-    bra.s _test_rtc_timeout         ; The RTC is not ready yet, timeout now
+    bra _test_rtc_timeout         ; The RTC is not ready yet, timeout now
 _rtc_ready:
     print ok_msg
+    rts
 
-; Get the date and time from the RP2040 and set the IKBD information
-set_datetime:
-    ; The date and time comes in the buffer
-    pea GEMDRVEMUL_RTC_STATUS           ; Buffer should have a valid IKBD date and time format
+
+
+
+
+; Configure the date and time when the RTC clock in the RP2040 is ready
+setup_datetime:
+    tst.l GEMDRVEMUL_RTC_Y2K_PATCH
+    beq.s _set_xbios_vector_ignore
+
+; We don't need to fix Y2K problem in EmuTOS
+; Save the old XBIOS vector in GEMDRVEMUL_RTC_OLD_XBIOS and set our own vector
+    print set_xbios_vector_msg
+    bsr save_xbios_vector
+    tst.w d0
+    bne _test_rtc_timeout
+    print ok_msg
+
+_set_xbios_vector_ignore:
+    pea GEMDRVEMUL_RTC_DATETIME_BCD     ; Buffer should have a valid IKBD date and time format
     move.w #6, -(sp)                    ; Six bytes plus the header = 7 bytes
     move.w #25, -(sp)                   ; 
     trap #14
     addq.l #8, sp
 
-    moveq #0, d0
+    print set_datetime_msg
+
+    move.l GEMDRVEMUL_RTC_DATETIME_MSDOS, d0
+    bsr set_datetime
+    tst.w d0
+    bne _exit_timemout
 
 	move.w #23,-(sp)                    ; gettime from XBIOS
 	trap #14
 	addq.l #2,sp
 
-    add.l #$3c000000,d0                 ; Fix the Y2K problem
+    tst.l GEMDRVEMUL_RTC_Y2K_PATCH
+    beq.s _ignore_y2k
+    add.l #$3c000000,d0                 ; +30 years to guarantee the Y2K problem works in all TOS versions
+_ignore_y2k:
 
-	move.l d0,d7
+    move.l d0, -(sp)                    ; Save the date and time in MSDOS format
+    move.w #22,-(sp)                    ; settime with XBIOS
+    trap #14
+    addq.l #6, sp
 
-	move.w d7,-(sp)
-	move.w #$2d,-(sp)                   ; settime with GEMDOS
-	trap #1
-	addq.l #4,sp
-
-	swap d7
-
-	move.w d7,-(sp)
-	move.w #$2b,-(sp)                   ; settime with GEMDOS  
-	trap #1
-	addq.l #4,sp
-
-    ; And we are done!
+    print ok_msg
     moveq #0, d0
     rts
 
-    moveq #0, d0
-    rts
 _test_rtc_timeout:
     print timeout_msg
     moveq #-1, d0
@@ -511,10 +541,178 @@ _test_rtc_timeout:
 
 _test_rtc_canceled:
     print canceled_msg
-
     send_sync CMD_CANCEL, 0         ; Force cancel command
-
     moveq #-1, d0
+    rts
+
+
+; Send a synchronous command to the Sidecart setting the reentry flag for the next XBIOS calls
+; inside our trapped XBIOS calls. Should be always paired with reentry_xbios_unlock
+reentry_xbios_lock	macro
+                    movem.l d0-d7/a0-a6,-(sp)            ; Save all registers
+                    send_sync CMD_REENTRY_XBIOS_LOCK,0   ; Command code to lock the reentry
+                    movem.l (sp)+,d0-d7/a0-a6            ; Restore all registers
+                	endm
+
+; Send a synchronous command to the Sidecart clearing the reentry flag for the next XBIOS calls
+; inside our trapped XBIOS calls. Should be always paired with reentry_xbios_lock
+reentry_xbios_unlock  macro
+                    movem.l d0-d7/a0-a6,-(sp)            ; Save all registers
+                    send_sync CMD_REENTRY_XBIOS_UNLOCK,0 ; Command code to unlock the reentry
+                    movem.l (sp)+,d0-d7/a0-a6            ; Restore all registers
+                	endm
+
+save_xbios_vector:
+    move.l XBIOS_TRAP_ADDR.w,d3         ; Address of the old XBIOS vector
+    send_sync CMD_SAVE_XBIOS_VECTOR,4   ; Send the command to the Sidecart
+    tst.w d0                            ; 0 if no error
+    bne.s _save_xbios_vector_timeout    ; The RP2040 is not responding, timeout now
+
+    ; Now we have the XBIOS vector in GEMDRVEMUL_RTC_OLD_XBIOS
+    ; Now we can safely change it to our own vector
+    move.l #custom_xbios,XBIOS_TRAP_ADDR.w    ; Set our own vector
+    moveq #0, d0
+    rts
+_save_xbios_vector_timeout:
+    moveq #-1, d0
+    rts
+
+custom_xbios:
+    btst #0, GEMDRVEMUL_RTC_XBIOS_REENTRY_TRAP      ; Check if the reentry is locked
+    beq.s _custom_bios_trapped         ; If the bit is active, we are in a reentry call. We need to exec_old_handler the code
+
+    move.l GEMDRVEMUL_OLD_XBIOS_TRAP, -(sp) ; if not, continue with XBIOS call
+    rts 
+
+_custom_bios_trapped:
+    btst #5, (sp)                    ; Check if called from user mode
+    beq.s _xbios_user_mode                 ; if so, do correct stack pointer
+_xbios_not_user_mode:
+    move.l sp,a0                     ; Move stack pointer to a0
+    bra.s _xbios_check_cpu
+_xbios_user_mode:
+    move.l usp,a0                    ; if user mode, correct stack pointer
+    subq.l #6,a0
+;
+; This code checks if the CPU is a 68000 or not
+;
+_xbios_check_cpu:
+    tst.w _longframe                ; Check if the CPU is a 68000 or not
+    beq.s _xbios_notlong
+_xbios_long:
+    addq.w #2, a0                   ; Correct the stack pointer parameters for long frames 
+_xbios_notlong:
+    cmp.w #23,6(a0)                 ; is it XBIOS call 23 / getdatetime?
+    beq.s _getdatetime              ; if yes, go to our own routine
+    cmp.w #22,6(a0)                 ; is it XBIOS call 22 / setdatetime?
+    beq.s _setdatetime              ; if yes, go to our own routine
+
+_continue_xbios:
+    move.l GEMDRVEMUL_OLD_XBIOS_TRAP, -(sp) ; if not, continue with XBIOS call
+    rts 
+
+; Adjust the time when reading to compensate for the Y2K problem
+; We should not tap this call for EmuTOS
+_getdatetime:
+    reentry_xbios_lock
+	move.w #23,-(sp)
+	trap #14
+	addq.l #2,sp
+	add.l #$3c000000,d0 ; +30 years for all TOS except EmuTOS
+    reentry_xbios_unlock
+	rte
+
+; Adjust the time when setting to compensate for the Y2K problem
+; We should not tap this call for TOS 2.06 and EmuTOS
+_setdatetime:
+	sub.l #$3c000000,8(a0)
+    bra.s _continue_xbios
+
+; Get the date and time from the RP2040 and set the IKBD information
+; d0.l : Date and time in MSDOS format
+set_datetime:
+    move.l d0, d7
+
+    bsr print_hour
+    pchar ':'
+    move.l d7, d0
+    bsr print_minute
+    pchar ':'
+    move.l d7, d0
+    bsr print_seconds
+
+    pchar ' '
+
+    swap d7
+    move.l d7, d0
+    bsr print_day
+    pchar '/'
+    move.l d7, d0
+    bsr print_month
+    pchar '/'
+    move.l d7, d0
+    bsr print_year
+
+    swap d7
+
+	move.w d7,-(sp)
+	move.w #$2d,-(sp)                   ; settime with GEMDOS
+	trap #1
+	addq.l #4,sp
+    tst.w d0
+    bne.s _exit_set_time
+
+	swap d7
+
+	move.w d7,-(sp)
+	move.w #$2b,-(sp)                   ; settime with GEMDOS  
+	trap #1
+	addq.l #4,sp
+    tst.w d0
+    bne.s _exit_set_time
+
+    ; And we are done!
+    moveq #0, d0
+    rts
+_exit_set_time:
+    moveq #-1, d0
+    rts
+
+print_seconds:
+    and.l #%11111,d0
+    print_num
+    rts
+
+print_minute:
+    lsr.l #5, d0
+    and.l #%111111,d0
+    print_num
+    rts
+
+print_hour:
+    lsr.l #8, d0
+    lsr.l #3, d0
+    and.l #%11111,d0
+    print_num
+    rts
+
+print_day:
+    and.l #%11111,d0
+    print_num
+    rts
+
+print_month:
+    lsr.l #5, d0
+    and.l #%1111,d0
+    print_num
+    rts
+
+print_year:
+    lsr.l #8, d0
+    lsr.l #1, d0
+    and.l #%1111111,d0
+    sub.l #20, d0 ; Year - 1980
+    print_num
     rts
 
 ;
@@ -1521,7 +1719,10 @@ set_version_msg:
         dc.b	"[..] TOS version: ",0
 
 set_vectors_msg:
-        dc.b	"[..] Set vectors...",0
+        dc.b	"[..] Set GEMDOS vector...",0
+
+set_xbios_vector_msg:
+        dc.b	"[..] Set XBIOS vector...",0
 
 stack_buffer_msg:
         dc.b	"[..] Using stack as temp buffer...",0
@@ -1540,6 +1741,9 @@ query_ntp_msg:
 
 rtc_already_started_msg:
         dc.b	"[..] RTC already started.",0
+
+set_datetime_msg:
+        dc.b	"[..] Date and time: ",0
 
 emulated_drive_msg:
         dc.b	"[..] Emulating drive ",0
